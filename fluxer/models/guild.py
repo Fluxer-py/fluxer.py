@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from fluxer.models.emoji import Emoji
+from fluxer.models.member import GuildMember
+from fluxer.models.role import Role
+
 from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
@@ -46,7 +50,7 @@ class Guild:
             return f"https://fluxerusercontent.com/icons/{self.id}/{self.icon}.{ext}"
         return None
 
-    async def fetch_emojis(self) -> list[Any]:
+    async def fetch_emojis(self) -> list[Emoji]:
         """Fetch all emojis in this guild.
 
         Returns:
@@ -65,7 +69,7 @@ class Guild:
         ]
 
     # -- Role Management Methods --
-    async def fetch_roles(self) -> list[Any]:
+    async def fetch_roles(self) -> list[Role]:
         """Fetch all roles in this guild.
 
         Returns:
@@ -90,7 +94,7 @@ class Guild:
         color: int = 0,
         hoist: bool = False,
         mentionable: bool = False,
-    ) -> Any:
+    ) -> Role:
         """Create a new role in this guild.
 
         Args:
@@ -119,7 +123,7 @@ class Guild:
         return Role.from_data(data, self._http, guild_id=self.id)
 
     # -- Member Management Methods --
-    async def fetch_member(self, user_id: int) -> Any:
+    async def fetch_member(self, user_id: int) -> GuildMember:
         """Fetch a specific member from this guild.
 
         Args:
@@ -138,7 +142,7 @@ class Guild:
 
     async def fetch_members(
         self, *, limit: int = 100, after: int | None = None
-    ) -> list[Any]:
+    ) -> list[GuildMember]:
         """Fetch members from this guild.
 
         Args:
