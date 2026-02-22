@@ -453,13 +453,11 @@ class Client:
                 token,
                 api_url=self.api_url,
                 max_retries=self._max_retries,
-                retry_forever=self._retry_forever
+                retry_forever=self._retry_forever,
             )
         else:
             self._http = HTTPClient(
-                token,
-                max_retries=self._max_retries,
-                retry_forever=self._retry_forever
+                token, max_retries=self._max_retries, retry_forever=self._retry_forever
             )
 
         self._gateway = Gateway(
@@ -525,8 +523,8 @@ class Bot(Client):
         command_prefix: str = "!",
         intents: Intents = Intents.default(),
         api_url: str | None = None,
-        max_retries: int = 4,         
-        retry_forever: bool = False, 
+        max_retries: int = 4,
+        retry_forever: bool = False,
     ) -> None:
         super().__init__(intents=intents, api_url=api_url)
         self.command_prefix = command_prefix
