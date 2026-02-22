@@ -32,7 +32,7 @@ For development:
 
 ``` sh
 git clone https://github.com/akarealemil/fluxer.py.git
-cd fluxer-py
+cd fluxer.py
 pip install -e .
 ```
 
@@ -161,7 +161,7 @@ We use `uv` for dependency management.
 
 ``` sh
 git clone https://github.com/akarealemil/fluxer.py.git
-cd fluxer-py
+cd fluxer.py
 uv sync --dev
 ```
 
