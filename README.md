@@ -1,6 +1,6 @@
 # fluxer.py
 
-An asynchronous Python API wrapper for Fluxer.
+A Python API wrapper for [Fluxer](https://fluxer.app).
 
 Build bots and automated clients with a clean, type-safe, and
 event-driven architecture.

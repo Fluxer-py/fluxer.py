@@ -31,7 +31,9 @@ class Route:
         # route.bucket = "GET /channels/{channel_id}/messages"
     """
 
-    def __init__(self, method: str, path: str, base_url: str = DEFAULT_API_URL, **params: Any) -> None:
+    def __init__(
+        self, method: str, path: str, base_url: str = DEFAULT_API_URL, **params: Any
+    ) -> None:
         self.method = method
         self.path = path
         self.base_url = base_url
@@ -298,7 +300,9 @@ class HTTPClient:
 
     async def get_user(self, user_id: int | str) -> dict[str, Any]:
         """GET /users/{user_id}"""
-        return await self.request(self._route("GET", "/users/{user_id}", user_id=user_id))
+        return await self.request(
+            self._route("GET", "/users/{user_id}", user_id=user_id)
+        )
 
     async def get_user_profile(
         self, user_id: int | str, *, guild_id: int | str | None = None
@@ -390,8 +394,7 @@ class HTTPClient:
             form = aiohttp.FormData()
 
             payload["attachments"] = [
-                {"id": i, "filename": file["filename"]}
-                for i, file in enumerate(files)
+                {"id": i, "filename": file["filename"]} for i, file in enumerate(files)
             ]
 
             form.add_field(
@@ -410,7 +413,6 @@ class HTTPClient:
             return await self.request(route, data=form)
 
         return await self.request(route, json=payload)
-
 
     async def get_message(
         self,
@@ -441,7 +443,9 @@ class HTTPClient:
         if after:
             params["after"] = after
 
-        route = self._route("GET", "/channels/{channel_id}/messages", channel_id=channel_id)
+        route = self._route(
+            "GET", "/channels/{channel_id}/messages", channel_id=channel_id
+        )
         return await self.request(route, params=params)
 
     async def edit_message(
@@ -466,7 +470,9 @@ class HTTPClient:
             payload["embeds"] = embeds
         return await self.request(route, json=payload)
 
-    async def delete_message(self, channel_id: int | str, message_id: int | str) -> None:
+    async def delete_message(
+        self, channel_id: int | str, message_id: int | str
+    ) -> None:
         """DELETE /channels/{channel_id}/messages/{message_id}"""
         route = self._route(
             "DELETE",
@@ -479,7 +485,9 @@ class HTTPClient:
     # -- Guilds --
     async def get_guild(self, guild_id: int | str) -> dict[str, Any]:
         """GET /guilds/{guild_id}"""
-        return await self.request(self._route("GET", "/guilds/{guild_id}", guild_id=guild_id))
+        return await self.request(
+            self._route("GET", "/guilds/{guild_id}", guild_id=guild_id)
+        )
 
     async def get_guild_channels(self, guild_id: int | str) -> list[dict[str, Any]]:
         """GET /guilds/{guild_id}/channels"""
@@ -509,7 +517,8 @@ class HTTPClient:
             params["after"] = after
 
         return await self.request(
-            self._route("GET", "/guilds/{guild_id}/members", guild_id=guild_id), params=params
+            self._route("GET", "/guilds/{guild_id}/members", guild_id=guild_id),
+            params=params,
         )
 
     async def create_guild(
@@ -550,7 +559,9 @@ class HTTPClient:
 
     async def delete_guild(self, guild_id: int | str) -> None:
         """DELETE /guilds/{guild_id}"""
-        await self.request(self._route("DELETE", "/guilds/{guild_id}", guild_id=guild_id))
+        await self.request(
+            self._route("DELETE", "/guilds/{guild_id}", guild_id=guild_id)
+        )
 
     async def modify_guild(
         self,
@@ -618,7 +629,8 @@ class HTTPClient:
         payload.update(kwargs)
 
         return await self.request(
-            self._route("POST", "/guilds/{guild_id}/roles", guild_id=guild_id), json=payload
+            self._route("POST", "/guilds/{guild_id}/roles", guild_id=guild_id),
+            json=payload,
         )
 
     async def modify_guild_role(
@@ -1120,7 +1132,9 @@ class HTTPClient:
             self._route("GET", "/guilds/{guild_id}/emojis", guild_id=guild_id)
         )
 
-    async def get_guild_emoji(self, guild_id: int | str, emoji_id: int | str) -> dict[str, Any]:
+    async def get_guild_emoji(
+        self, guild_id: int | str, emoji_id: int | str
+    ) -> dict[str, Any]:
         """GET /guilds/{guild_id}/emojis/{emoji_id} — Get a specific emoji.
 
         Returns:
@@ -1336,7 +1350,9 @@ class HTTPClient:
         if avatar is not None:
             payload["avatar"] = avatar
         return await self.request(
-            self._route("POST", "/channels/{channel_id}/webhooks", channel_id=channel_id),
+            self._route(
+                "POST", "/channels/{channel_id}/webhooks", channel_id=channel_id
+            ),
             json=payload,
         )
 
@@ -1416,7 +1432,9 @@ class HTTPClient:
             reason=reason,
         )
 
-    async def delete_webhook_with_token(self, webhook_id: int | str, token: str) -> None:
+    async def delete_webhook_with_token(
+        self, webhook_id: int | str, token: str
+    ) -> None:
         """DELETE /webhooks/{webhook_id}/{token}"""
         await self.request(
             self._route(
@@ -1480,13 +1498,13 @@ class HTTPClient:
             return f"{emoji.name}:{emoji.id}"
         elif hasattr(emoji, "name") and emoji.name:
             # Unicode emoji from PartialEmoji
-            return urllib.parse.quote(emoji.name, safe='')
+            return urllib.parse.quote(emoji.name, safe="")
         else:
             # Handle string emojis
             emoji_str = str(emoji)
 
             # Check for custom emoji format: <:name:id> or <a:name:id>
-            custom_emoji_match = re.match(r'^<a?:([^:]+):(\d+)>$', emoji_str)
+            custom_emoji_match = re.match(r"^<a?:([^:]+):(\d+)>$", emoji_str)
             if custom_emoji_match:
                 # Extract name and id, return as name:id
                 name, emoji_id = custom_emoji_match.groups()
@@ -1494,10 +1512,10 @@ class HTTPClient:
 
             # Convert shortcode to unicode emoji (e.g., :joy: → 😂)
             # emojize will convert :joy: to 😂, but leave 😂 as-is
-            emoji_str = emoji_lib.emojize(emoji_str, language='alias')
+            emoji_str = emoji_lib.emojize(emoji_str, language="alias")
 
             # URL-encode the result
-            return urllib.parse.quote(emoji_str, safe='')
+            return urllib.parse.quote(emoji_str, safe="")
 
     async def add_reaction(
         self,
