@@ -130,7 +130,15 @@ class HTTPClient:
                  Use this to connect to self-hosted Fluxer instances
     """
 
-    def __init__(self, token: str, *, is_bot: bool = True, api_url: str = DEFAULT_API_URL, max_retries=4, retry_forever=False) -> None:
+    def __init__(
+        self,
+        token: str,
+        *,
+        is_bot: bool = True,
+        api_url: str = DEFAULT_API_URL,
+        max_retries=4,
+        retry_forever=False,
+    ) -> None:
         self.token = token
         self.is_bot = is_bot
         self.api_url = api_url.rstrip("/")  # Remove trailing slash if present
@@ -175,8 +183,8 @@ class HTTPClient:
         data: aiohttp.FormData | None = None,
         params: dict[str, Any] | None = None,
         reason: str | None = None,
-        max_retries: int | None = None,       
-        retry_forever: bool | None = None,     
+        max_retries: int | None = None,
+        retry_forever: bool | None = None,
     ) -> Any:
         """Make an authenticated request to the Fluxer API.
 
@@ -238,7 +246,9 @@ class HTTPClient:
                             await asyncio.sleep(retry_after)
                         attempt += 1
                         if not retry_forever and attempt > max_retries:
-                            raise RuntimeError(f"Failed after {attempt} attempts: {route.method} {route.url}")
+                            raise RuntimeError(
+                                f"Failed after {attempt} attempts: {route.method} {route.url}"
+                            )
                         continue
 
                     # Server error — retry
@@ -252,7 +262,9 @@ class HTTPClient:
                         await asyncio.sleep(1 + attempt)
                         attempt += 1
                         if not retry_forever and attempt > max_retries:
-                            raise RuntimeError(f"Failed after {attempt} attempts: {route.method} {route.url}")
+                            raise RuntimeError(
+                                f"Failed after {attempt} attempts: {route.method} {route.url}"
+                            )
                         continue
 
                     # Client error — raise
@@ -481,6 +493,18 @@ class HTTPClient:
             message_id=message_id,
         )
         await self.request(route)
+
+    async def delete_messages(
+        self, channel_id: int | str, message_ids: list[int | str]
+    ) -> None:
+        """POST /channels/{channel_id}/messages/bulk-delete"""
+        route = self._route(
+            "POST",
+            "/channels/{channel_id}/messages/bulk-delete",
+            channel_id=channel_id,
+        )
+        payload = {"message_ids": [str(mid) for mid in message_ids]}
+        await self.request(route, json=payload)
 
     # -- Guilds --
     async def get_guild(self, guild_id: int | str) -> dict[str, Any]:

@@ -151,6 +151,35 @@ class Channel:
         data = await self._http.get_message(self.id, message_id)
         return Message.from_data(data, self._http)
 
+    async def fetch_messages(self, limit: int = 50) -> list[Message]:
+        """Fetch recent messages from this channel.
+
+        Args:
+            limit: The maximum number of messages to fetch (default 50).
+
+        Returns:
+            A list of Message objects.
+        """
+        from .message import Message
+
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+
+        data = await self._http.get_messages(self.id, limit=limit)
+        return [Message.from_data(msg_data, self._http) for msg_data in data]
+
+    async def delete_messages(self, message_ids: list[int | str]) -> None:
+        """Bulk delete messages in this channel.
+
+        Args:
+            message_ids: A list of message IDs to delete.
+
+        """
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+
+        await self._http.delete_messages(self.id, message_ids)
+
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Channel) and self.id == other.id
 
