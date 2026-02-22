@@ -1,5 +1,5 @@
 <div align="center">
-<a href="https://github.com/akarealemil/fluxer.py"><img src="https://fluxerusercontent.com/attachments/1471802484305944610/1475241549270843696/fluxerpy.webp" height="100px;" alt="Invite Tracker"/></a>
+<a href="https://github.com/akarealemil/fluxer.py"><img src="https://fluxerusercontent.com/attachments/1471802484305944610/1475241549270843696/fluxerpy.webp" height="281px;" alt="Invite Tracker"/></a>
 <br><br>
 <a href="https://pypi.org/project/fluxer.py"><img alt="Supported python versions" src="https://img.shields.io/pypi/pyversions/fluxer.py?style=for-the-badge"></a>
 <a href="https://pypi.org/project/fluxer.py"><img alt="PyPI version" src="https://img.shields.io/pypi/v/fluxer.py?style=for-the-badge"></a>
