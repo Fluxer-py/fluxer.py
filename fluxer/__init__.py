@@ -10,6 +10,9 @@ from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permis
 from .file import File
 from .http import HTTPClient
 
+# Checks
+from .checks import has_role, has_permission
+
 # Errors
 from .errors import (
     BadRequest,
@@ -41,6 +44,9 @@ from .models import (
 from .utils import datetime_to_snowflake, snowflake_to_datetime
 
 __all__ = [
+    # Checks
+    "has_role",
+    "has_permission",
     # Client
     "Bot",
     "Client",
