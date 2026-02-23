@@ -132,3 +132,61 @@ class ChannelType(enum.IntEnum):
     GROUP_DM = 3
     GUILD_CATEGORY = 4
     GUILD_ANNOUNCEMENT = 5
+
+
+# =============================================================================
+# Permissions
+# =============================================================================
+
+
+class Permissions(enum.IntFlag):
+    """Permission bitfield flags for guild roles and channel overwrites.
+
+    Each member maps to a single bit in the permission integer stored on a
+    role or channel overwrite.  Use bitwise operators to combine or test flags:
+
+        Permissions.SEND_MESSAGES | Permissions.READ_MESSAGE_HISTORY
+        bool(role_permissions & Permissions.ADMINISTRATOR)
+    """
+
+    # -- General --
+    CREATE_INVITE = 1 << 0
+    KICK_MEMBERS = 1 << 1
+    BAN_MEMBERS = 1 << 2
+    ADMINISTRATOR = 1 << 3
+    MANAGE_CHANNELS = 1 << 4
+    MANAGE_GUILD = 1 << 5
+    ADD_REACTIONS = 1 << 6
+    VIEW_AUDIT_LOG = 1 << 7
+    PRIORITY_SPEAKER = 1 << 8
+    STREAM = 1 << 9
+    VIEW_CHANNEL = 1 << 10
+    SEND_MESSAGES = 1 << 11
+    SEND_TTS_MESSAGES = 1 << 12
+    MANAGE_MESSAGES = 1 << 13
+    EMBED_LINKS = 1 << 14
+    ATTACH_FILES = 1 << 15
+    READ_MESSAGE_HISTORY = 1 << 16
+    MENTION_EVERYONE = 1 << 17
+    USE_EXTERNAL_EMOJIS = 1 << 18
+    USE_EXTERNAL_STICKERS = 1 << 33
+    MODERATE_MEMBERS = 1 << 40
+    CREATE_EXPRESSIONS = 1 << 43
+    PIN_MESSAGES = 1 << 51
+    BYPASS_SLOWMODE = 1 << 52
+    UPDATE_RTC_REGION = 1 << 53
+
+    # -- Voice --
+    CONNECT = 1 << 20
+    SPEAK = 1 << 21
+    MUTE_MEMBERS = 1 << 22
+    DEAFEN_MEMBERS = 1 << 23
+    MOVE_MEMBERS = 1 << 24
+    USE_VOICE_ACTIVITY_DETECTION = 1 << 25
+
+    # -- Member management --
+    CHANGE_NICKNAME = 1 << 26
+    MANAGE_NICKNAMES = 1 << 27
+    MANAGE_ROLES = 1 << 28
+    MANAGE_WEBHOOKS = 1 << 29
+    MANAGE_EXPRESSIONS = 1 << 30

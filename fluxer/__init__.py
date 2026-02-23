@@ -6,7 +6,7 @@ __license__ = "MIT"
 # Core classes
 from .client import Bot, Client
 from .cog import Cog
-from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents
+from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
 from .file import File
 from .http import HTTPClient
 
@@ -52,6 +52,7 @@ __all__ = [
     "GatewayCloseCode",
     "GatewayOpcode",
     "Intents",
+    "Permissions",
     # Errors
     "BadRequest",
     "FluxerException",
