@@ -32,7 +32,12 @@ class Client:
     """
 
     def __init__(
-        self, *, intents: Intents = Intents.default(), api_url: str | None = None
+        self,
+        *,
+        intents: Intents = Intents.default(),
+        api_url: str | None = None,
+        max_retries: int = 5,
+        retry_forever: bool = False,
     ) -> None:
         self.intents = intents
         self.api_url = api_url
@@ -43,6 +48,8 @@ class Client:
         self._guilds: dict[int, Guild] = {}
         self._channels: dict[int, Channel] = {}
         self._closed: bool = False
+        self._max_retries = max_retries
+        self._retry_forever = retry_forever
 
     @property
     def user(self) -> User | None:
@@ -515,6 +522,8 @@ class Bot(Client):
         intents: Gateway intents to request (default: Intents.default())
         api_url: Base URL for the Fluxer API (default: https://api.fluxer.app/v1)
                  Use this to connect to self-hosted Fluxer instances
+        max_retries: Maximum number of retries for HTTP requests (default: 4)
+        retry_forever: Whether to retry HTTP requests indefinitely (default: False)
     """
 
     def __init__(
@@ -526,14 +535,16 @@ class Bot(Client):
         max_retries: int = 4,
         retry_forever: bool = False,
     ) -> None:
-        super().__init__(intents=intents, api_url=api_url)
+        super().__init__(
+            intents=intents,
+            api_url=api_url,
+            max_retries=max_retries,
+            retry_forever=retry_forever,
+        )
         self.command_prefix = command_prefix
         self._commands: dict[str, EventHandler] = {}
         self._cogs: dict[str, Any] = {}  # Store loaded cogs
         self._extensions: dict[str, Any] = {}  # Store loaded extensions
-
-        self._max_retries = max_retries
-        self._retry_forever = retry_forever
 
         # Auto-register the command dispatcher
         @self.event
