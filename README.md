@@ -38,6 +38,12 @@ pip install -e .
 
 ------------------------------------------------------------------------
 
+## Template
+
+A [batteries-included template](https://github.com/PerpetualPossum/fluxer-py-template) is available to get you started quickly with a new bot project.
+
+------------------------------------------------------------------------
+
 ## Quick Start
 
 A simple bot with a ping command:
