@@ -158,7 +158,10 @@ class Guild:
         from .member import GuildMember
 
         data = await self._http.get_guild_members(self.id, limit=limit, after=after)
-        return [GuildMember.from_data(member_data, self._http, guild_id=self.id) for member_data in data]
+        return [
+            GuildMember.from_data(member_data, self._http, guild_id=self.id)
+            for member_data in data
+        ]
 
     # -- Moderation Methods --
     async def kick(self, user_id: int, *, reason: str | None = None) -> None:
