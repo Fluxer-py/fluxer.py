@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from ..file import File
     from ..http import HTTPClient
     from .channel import Channel
+    from .guild import Guild
     from .reaction import PartialEmoji, Reaction
     from .user import User
 
@@ -33,6 +34,7 @@ class Message:
 
     _http: HTTPClient | None = field(default=None, repr=False)
     _channel: Channel | None = field(default=None, repr=False)
+    _guild: Guild | None = field(default=None, repr=False)
 
     @classmethod
     def from_data(cls, data: dict[str, Any], http: HTTPClient | None = None) -> Message:
@@ -74,6 +76,11 @@ class Message:
     def channel(self) -> Channel | None:
         """The channel this message was sent in (if cached)."""
         return self._channel
+
+    @property
+    def guild(self) -> Guild | None:
+        """The guild this message was sent in (if cached)."""
+        return self._guild
 
     @staticmethod
     def _process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -148,7 +155,10 @@ class Message:
             files=file_list,
             **combined_kwargs,
         )
-        return Message.from_data(data, self._http)
+        msg = Message.from_data(data, self._http)
+        msg._channel = self._channel
+        msg._guild = self._guild
+        return msg
 
     async def reply(
         self,
@@ -202,7 +212,10 @@ class Message:
             files=file_list,
             **combined_kwargs,
         )
-        return Message.from_data(data, self._http)
+        msg = Message.from_data(data, self._http)
+        msg._channel = self._channel
+        msg._guild = self._guild
+        return msg
 
     async def send_to_channel(
         self,
@@ -249,7 +262,9 @@ class Message:
         data = await self._http.send_message(
             channel_id, content=content, files=file_list, **combined_kwargs
         )
-        return Message.from_data(data, self._http)
+        msg = Message.from_data(data, self._http)
+        msg._guild = self._guild
+        return msg
 
     async def edit(self, content: str | None = None, **kwargs: Any) -> Message:
         """Edit this message."""
@@ -258,7 +273,10 @@ class Message:
         data = await self._http.edit_message(
             self.channel_id, self.id, content=content, **kwargs
         )
-        return Message.from_data(data, self._http)
+        msg = Message.from_data(data, self._http)
+        msg._channel = self._channel
+        msg._guild = self._guild
+        return msg
 
     async def delete(self) -> None:
         """Delete this message."""

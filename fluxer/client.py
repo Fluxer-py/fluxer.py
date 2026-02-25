@@ -150,6 +150,7 @@ class Client:
                 # Cache channels from guild
                 for ch_data in data.get("channels", []):
                     ch = Channel.from_data(ch_data, self._http)
+                    ch._guild = guild
                     self._channels[ch.id] = ch
                 await self._fire("on_guild_join", guild)
 
@@ -166,11 +167,15 @@ class Client:
 
             case "CHANNEL_CREATE":
                 channel = Channel.from_data(data, self._http)
+                if channel.guild_id is not None:
+                    channel._guild = self._guilds.get(channel.guild_id)
                 self._channels[channel.id] = channel
                 await self._fire("on_channel_create", channel)
 
             case "CHANNEL_UPDATE":
                 channel = Channel.from_data(data, self._http)
+                if channel.guild_id is not None:
+                    channel._guild = self._guilds.get(channel.guild_id)
                 self._channels[channel.id] = channel
                 await self._fire("on_channel_update", channel)
 
@@ -208,12 +213,18 @@ class Client:
                 await self._fire(handler_name, data)
 
     def _parse_message(self, data: dict[str, Any]) -> Message:
-        """Parse message data and attach cached channel reference."""
+        """Parse message data and attach cached channel and guild references."""
         msg = Message.from_data(data, self._http)
         # Attach cached channel
         cached_channel = self._channels.get(msg.channel_id)
         if cached_channel:
             msg._channel = cached_channel
+        # Resolve guild_id via channel if not present in message data
+        guild_id = msg.guild_id or (cached_channel.guild_id if cached_channel else None)
+        if guild_id is not None:
+            cached_guild = self._guilds.get(guild_id)
+            if cached_guild:
+                msg._guild = cached_guild
         return msg
 
     async def _handle_reaction_add(self, data: dict[str, Any]) -> None:
@@ -289,7 +300,7 @@ class Client:
         """Fetch a message from the API by channel ID and message ID."""
         assert self._http is not None
         data = await self._http.get_message(channel_id, message_id)
-        return Message.from_data(data, self._http)
+        return self._parse_message(data)
 
     async def delete_message(
         self, channel_id: int | str, message_id: int | str

@@ -27,6 +27,7 @@ class GuildMember:
     accent_color: int | None = None  # Guild-specific accent color
     roles: list[int] = field(default_factory=list)  # Role IDs (as ints)
     joined_at: str | None = None  # ISO 8601 timestamp
+    guild_id: int | None = None
 
     # Invite/join tracking
     join_source_type: int | None = None
@@ -45,7 +46,11 @@ class GuildMember:
 
     @classmethod
     def from_data(
-        cls, data: dict[str, Any], http: HTTPClient | None = None
+        cls,
+        data: dict[str, Any],
+        http: HTTPClient | None = None,
+        *,
+        guild_id: int | None = None,
     ) -> GuildMember:
         # Parse the nested user object
         user = User.from_data(data["user"], http)
@@ -64,6 +69,8 @@ class GuildMember:
             mute=data.get("mute", False),
             deaf=data.get("deaf", False),
             communication_disabled_until=data.get("communication_disabled_until"),
+            guild_id=guild_id
+            or (int(data["guild_id"]) if data.get("guild_id") else None),
             _http=http,
         )
 
@@ -90,50 +97,40 @@ class GuildMember:
             return f"https://fluxerusercontent.com/guilds/avatars/{self.user.id}/{self.avatar_hash}.{ext}"
         return None
 
-    @property
-    def guild_id(self) -> int | None:
-        """Get the guild ID from the HTTP client context if available."""
-        # This is a helper for convenience methods that need guild_id
-        # The guild_id should be stored in the member context
-        # For now, we'll require it to be passed to methods
-        return None
-
     # -- Role Management Methods --
-    async def add_role(
-        self, role_id: int, *, reason: str | None = None, guild_id: int
-    ) -> None:
+    async def add_role(self, role_id: int, *, reason: str | None = None) -> None:
         """Add a role to this member.
 
         Args:
             role_id: Role ID to add
             reason: Reason for audit log
-            guild_id: Guild ID (required)
         """
         if not self._http:
             raise RuntimeError("Cannot add role without HTTPClient")
+        if not self.guild_id:
+            raise RuntimeError("Cannot add role without guild_id")
 
         await self._http.add_guild_member_role(
-            guild_id, self.user.id, role_id, reason=reason
+            self.guild_id, self.user.id, role_id, reason=reason
         )
         # Update local role list
         if role_id not in self.roles:
             self.roles.append(role_id)
 
-    async def remove_role(
-        self, role_id: int, *, reason: str | None = None, guild_id: int
-    ) -> None:
+    async def remove_role(self, role_id: int, *, reason: str | None = None) -> None:
         """Remove a role from this member.
 
         Args:
             role_id: Role ID to remove
             reason: Reason for audit log
-            guild_id: Guild ID (required)
         """
         if not self._http:
             raise RuntimeError("Cannot remove role without HTTPClient")
+        if not self.guild_id:
+            raise RuntimeError("Cannot remove role without guild_id")
 
         await self._http.remove_guild_member_role(
-            guild_id, self.user.id, role_id, reason=reason
+            self.guild_id, self.user.id, role_id, reason=reason
         )
         # Update local role list
         if role_id in self.roles:
@@ -151,17 +148,18 @@ class GuildMember:
         return role_id in self.roles
 
     # -- Moderation Methods --
-    async def kick(self, *, reason: str | None = None, guild_id: int) -> None:
+    async def kick(self, *, reason: str | None = None) -> None:
         """Kick (remove) this member from the guild.
 
         Args:
             reason: Reason for audit log
-            guild_id: Guild ID (required)
         """
         if not self._http:
             raise RuntimeError("Cannot kick member without HTTPClient")
+        if not self.guild_id:
+            raise RuntimeError("Cannot kick member without guild_id")
 
-        await self._http.kick_guild_member(guild_id, self.user.id, reason=reason)
+        await self._http.kick_guild_member(self.guild_id, self.user.id, reason=reason)
 
     async def ban(
         self,
@@ -169,7 +167,6 @@ class GuildMember:
         delete_message_days: int = 0,
         delete_message_seconds: int = 0,
         reason: str | None = None,
-        guild_id: int,
     ) -> None:
         """Ban this member from the guild.
 
@@ -177,13 +174,14 @@ class GuildMember:
             delete_message_days: Number of days to delete messages for (0-7)
             delete_message_seconds: Number of seconds to delete messages for (0-604800)
             reason: Reason for audit log
-            guild_id: Guild ID (required)
         """
         if not self._http:
             raise RuntimeError("Cannot ban member without HTTPClient")
+        if not self.guild_id:
+            raise RuntimeError("Cannot ban member without guild_id")
 
         await self._http.ban_guild_member(
-            guild_id,
+            self.guild_id,
             self.user.id,
             delete_message_days=delete_message_days,
             delete_message_seconds=delete_message_seconds,
@@ -191,23 +189,24 @@ class GuildMember:
         )
 
     async def timeout(
-        self, *, until: str | None = None, reason: str | None = None, guild_id: int
+        self, *, until: str | None = None, reason: str | None = None
     ) -> "GuildMember":
         """Timeout this member (or remove timeout).
 
         Args:
             until: ISO 8601 timestamp for when timeout expires (None to remove timeout)
             reason: Reason for audit log
-            guild_id: Guild ID (required)
 
         Returns:
             Updated GuildMember object
         """
         if not self._http:
             raise RuntimeError("Cannot timeout member without HTTPClient")
+        if not self.guild_id:
+            raise RuntimeError("Cannot timeout member without guild_id")
 
         data = await self._http.timeout_guild_member(
-            guild_id, self.user.id, until=until, reason=reason
+            self.guild_id, self.user.id, until=until, reason=reason
         )
         # Update the local timeout field
         self.communication_disabled_until = data.get("communication_disabled_until")
@@ -223,7 +222,6 @@ class GuildMember:
         channel_id: int | None = None,
         communication_disabled_until: str | None = None,
         reason: str | None = None,
-        guild_id: int,
     ) -> "GuildMember":
         """Edit this member.
 
@@ -235,16 +233,17 @@ class GuildMember:
             channel_id: Voice channel to move member to
             communication_disabled_until: Timeout timestamp (ISO 8601)
             reason: Reason for audit log
-            guild_id: Guild ID (required)
 
         Returns:
             Updated GuildMember object
         """
         if not self._http:
             raise RuntimeError("Cannot edit member without HTTPClient")
+        if not self.guild_id:
+            raise RuntimeError("Cannot edit member without guild_id")
 
         data = await self._http.modify_guild_member(
-            guild_id,
+            self.guild_id,
             self.user.id,
             nick=nick,
             roles=roles,

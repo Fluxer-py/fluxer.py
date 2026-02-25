@@ -138,7 +138,7 @@ class Guild:
         from .member import GuildMember
 
         data = await self._http.get_guild_member(self.id, user_id)
-        return GuildMember.from_data(data, self._http)
+        return GuildMember.from_data(data, self._http, guild_id=self.id)
 
     async def fetch_members(
         self, *, limit: int = 100, after: int | None = None
@@ -158,7 +158,7 @@ class Guild:
         from .member import GuildMember
 
         data = await self._http.get_guild_members(self.id, limit=limit, after=after)
-        return [GuildMember.from_data(member_data, self._http) for member_data in data]
+        return [GuildMember.from_data(member_data, self._http, guild_id=self.id) for member_data in data]
 
     # -- Moderation Methods --
     async def kick(self, user_id: int, *, reason: str | None = None) -> None:

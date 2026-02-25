@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from ..file import File
     from ..http import HTTPClient
     from .embed import Embed
+    from .guild import Guild
     from .message import Message
 
 
@@ -28,6 +29,7 @@ class Channel:
     parent_id: int | None = None
 
     _http: HTTPClient | None = field(default=None, repr=False)
+    _guild: Guild | None = field(default=None, repr=False)
 
     @classmethod
     def from_data(cls, data: dict[str, Any], http: HTTPClient | None = None) -> Channel:
@@ -42,6 +44,10 @@ class Channel:
             parent_id=int(data["parent_id"]) if data.get("parent_id") else None,
             _http=http,
         )
+
+    @property
+    def guild(self) -> Guild | None:
+        return self._guild
 
     @property
     def mention(self) -> str:
@@ -132,7 +138,10 @@ class Channel:
             files=file_list,
             message_reference=message_reference,
         )
-        return Message.from_data(data, self._http)
+        msg = Message.from_data(data, self._http)
+        msg._channel = self
+        msg._guild = self._guild
+        return msg
 
     async def fetch_message(self, message_id: int | str) -> Message:
         """Fetch a message from this channel by ID.
@@ -149,7 +158,10 @@ class Channel:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         data = await self._http.get_message(self.id, message_id)
-        return Message.from_data(data, self._http)
+        msg = Message.from_data(data, self._http)
+        msg._channel = self
+        msg._guild = self._guild
+        return msg
 
     async def fetch_messages(self, limit: int = 50) -> list[Message]:
         """Fetch recent messages from this channel.
@@ -166,7 +178,11 @@ class Channel:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         data = await self._http.get_messages(self.id, limit=limit)
-        return [Message.from_data(msg_data, self._http) for msg_data in data]
+        msgs = [Message.from_data(msg_data, self._http) for msg_data in data]
+        for msg in msgs:
+            msg._channel = self
+            msg._guild = self._guild
+        return msgs
 
     async def delete_messages(self, message_ids: list[int | str]) -> None:
         """Bulk delete messages in this channel.
