@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING, Any
 from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
+    from ..file import File
     from ..http import HTTPClient
+    from .channel import Channel
+    from .message import Message
 
 
 @dataclass(slots=True)
@@ -102,6 +105,50 @@ class User:
             ext = "gif" if self.banner_hash.startswith("a_") else "png"
             return f"https://fluxerusercontent.com/banners/{self.id}/{self.banner_hash}.{ext}"
         return None
+
+    async def create_dm(self) -> Channel:
+        """Open a DM channel with this user.
+
+        Returns the existing DM channel if one is already open.
+
+        Returns:
+            The Channel object for the DM.
+        """
+        from .channel import Channel
+
+        if self._http is None:
+            raise RuntimeError("User is not bound to an HTTP client")
+        data = await self._http.create_dm(self.id)
+        return Channel.from_data(data, self._http)
+
+    async def send(
+        self,
+        content: str | None = None,
+        *,
+        embed: Any | None = None,
+        embeds: list[Any] | None = None,
+        file: File | None = None,
+        files: list[File] | None = None,
+        **kwargs: Any,
+    ) -> Message:
+        """Send a DM to this user.
+
+        Opens a DM channel, then sends the message.
+
+        Args:
+            content: The message content.
+            embed: A single embed to include.
+            embeds: Multiple embeds to include.
+            file: A single File object to attach.
+            files: Multiple File objects to attach.
+
+        Returns:
+            The sent Message object.
+        """
+        channel = await self.create_dm()
+        return await channel.send(
+            content, embed=embed, embeds=embeds, file=file, files=files, **kwargs
+        )
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, User) and self.id == other.id

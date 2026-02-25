@@ -338,6 +338,19 @@ class HTTPClient:
         params = {"guild_id": str(guild_id)} if guild_id else None
         return await self.request(route, params=params)
 
+    async def create_dm(self, user_id: int | str) -> dict[str, Any]:
+        """POST /users/@me/channels — Open a DM channel with a user.
+        Args:
+            user_id: The ID of the user to open a DM with.
+
+        Returns:
+            Channel object for the DM channel.
+        """
+        return await self.request(
+            self._route("POST", "/users/@me/channels"),
+            json={"recipient_id": str(user_id)},
+        )
+
     async def get_current_user_guilds(self) -> list[dict[str, Any]]:
         """GET /users/@me/guilds - get guilds the current user is in"""
         return await self.request(self._route("GET", "/users/@me/guilds"))
