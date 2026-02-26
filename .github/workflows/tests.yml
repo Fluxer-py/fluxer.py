@@ -35,6 +35,8 @@ jobs:
           uv sync --all-groups
 
       - name: Run tests with pytest
+        env:
+          FLUXER_BOT_TOKEN: ${{ secrets.FLUXER_BOT_TOKEN }}
         run: |
           uv run pytest tests/ -v --tb=short --cov=fluxer --cov-report=xml --cov-report=term
 
