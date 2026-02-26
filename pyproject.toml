@@ -30,6 +30,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+voice = [
+    "livekit>=0.17.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=1.3.0",

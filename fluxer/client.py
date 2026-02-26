@@ -6,12 +6,15 @@ import importlib.util
 import inspect
 import logging
 import sys
-from typing import Any, Callable, Coroutine
+from typing import TYPE_CHECKING, Any, Callable, Coroutine
+
+if TYPE_CHECKING:
+    from .voice import VoiceClient
 
 from .enums import Intents
 from .gateway import Gateway
 from .http import HTTPClient
-from .models import Channel, Guild, Message, User, UserProfile, Webhook
+from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webhook
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +50,8 @@ class Client:
         self._user: User | None = None
         self._guilds: dict[int, Guild] = {}
         self._channels: dict[int, Channel] = {}
+        self._voice_states: dict[int, dict[int, VoiceState]] = {}
+        self._pending_voice: dict[int, VoiceClient] = {}
         self._closed: bool = False
         self._max_retries = max_retries
         self._retry_forever = retry_forever
@@ -186,6 +191,34 @@ class Client:
                 else:
                     # Channel wasn't cached, fire event with raw data
                     await self._fire("on_channel_delete", data)
+
+            case "VOICE_STATE_UPDATE":
+                voice_state = VoiceState.from_data(data, self._http)
+                if voice_state.guild_id is not None:
+                    guild_states = self._voice_states.setdefault(
+                        voice_state.guild_id, {}
+                    )
+                    if voice_state.channel_id is None:
+                        # user left vc
+                        guild_states.pop(voice_state.user_id, None)
+                    else:
+                        guild_states[voice_state.user_id] = voice_state
+                await self._fire("on_voice_state_update", voice_state)
+
+            case "VOICE_SERVER_UPDATE":
+                guild_id = int(data["guild_id"])
+                vc = self._pending_voice.pop(guild_id, None)
+                if vc:
+                    bot_user_id = self._user.id if self._user else None
+                    cached_state = (
+                        self._voice_states.get(guild_id, {}).get(bot_user_id)
+                        if bot_user_id is not None
+                        else None
+                    )
+                    session_id = cached_state.session_id if cached_state else ""
+                    await vc._on_voice_server_update(
+                        data["endpoint"], data["token"], session_id or ""
+                    )
 
             case "RESUMED":
                 await self._fire("on_resumed")
@@ -364,6 +397,46 @@ class Client:
         assert self._http is not None
         data = await self._http.create_webhook(channel_id, name=name, avatar=avatar)
         return Webhook.from_data(data, self._http)
+
+    # =========================================================================
+    # Voice methods
+    # =========================================================================
+
+    async def join_voice(
+        self,
+        guild_id: int,
+        channel_id: int,
+        *,
+        self_mute: bool = False,
+        self_deaf: bool = False,
+    ) -> VoiceClient:
+        """Join a voice channel and return a connected VoiceClient.
+
+        Requires pip install fluxer.py[voice].
+        """
+        from .voice import VoiceClient
+
+        if self._gateway is None:
+            raise RuntimeError("Cannot join voice before connecting")
+
+        vc = VoiceClient(guild_id, channel_id, self._gateway)
+        self._pending_voice[guild_id] = vc
+        await self._gateway.update_voice_state(
+            guild_id=str(guild_id),
+            channel_id=str(channel_id),
+            self_mute=self_mute,
+            self_deaf=self_deaf,
+        )
+        await vc._wait_until_connected()
+        return vc
+
+    def get_voice_state(self, guild_id: int, user_id: int) -> VoiceState | None:
+        """Return the cached voice state for a user in a guild, or None."""
+        return self._voice_states.get(guild_id, {}).get(user_id)
+
+    def get_guild_voice_states(self, guild_id: int) -> list[VoiceState]:
+        """Return all cached voice states for a guild."""
+        return list(self._voice_states.get(guild_id, {}).values())
 
     # =========================================================================
     # Reaction methods

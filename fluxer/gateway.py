@@ -366,3 +366,22 @@ class Gateway:
             },
         )
         await self._send(payload)
+
+    async def update_voice_state(
+        self,
+        *,
+        guild_id: str,
+        channel_id: str | None = None,
+        self_mute: bool = False,
+        self_deaf: bool = False,
+    ) -> None:
+        payload = GatewayPayload(
+            op=GatewayOpcode.VOICE_STATE_UPDATE,
+            d={
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+                "self_mute": self_mute,
+                "self_deaf": self_deaf,
+            },
+        )
+        await self._send(payload)

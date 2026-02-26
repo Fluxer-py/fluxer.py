@@ -8,8 +8,10 @@ from ..enums import ChannelType
 from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
+    from ..client import Client
     from ..file import File
     from ..http import HTTPClient
+    from ..voice import VoiceClient
     from .embed import Embed
     from .message import Message
 
@@ -179,6 +181,25 @@ class Channel:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         await self._http.delete_messages(self.id, message_ids)
+
+    async def connect(
+        self,
+        client: Client,
+        *,
+        self_mute: bool = False,
+        self_deaf: bool = False,
+    ) -> VoiceClient:
+        """Join this voice channel and return a connected VoiceClient.
+
+        Requires fluxer.py[voice].
+        """
+        if not self.is_voice_channel:
+            raise TypeError(f"Cannot connect to a non-voice channel (type={self.type})")
+        if self.guild_id is None:
+            raise ValueError("Cannot connect to a voice channel without a guild_id")
+        return await client.join_voice(
+            self.guild_id, self.id, self_mute=self_mute, self_deaf=self_deaf
+        )
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Channel) and self.id == other.id
