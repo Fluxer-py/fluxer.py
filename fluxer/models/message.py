@@ -357,6 +357,32 @@ class Message:
             raise RuntimeError("Message is not bound to an HTTP client")
         await self._http.delete_all_reactions_for_emoji(self.channel_id, self.id, emoji)
 
+    async def pin(self) -> None:
+        """Pin this message to the channel.
+
+        Raises:
+            Forbidden: You don't have permission to pin messages
+            NotFound: The message doesn't exist
+            HTTPException: Pinning the message failed
+        """
+        if self._http is None:
+            raise RuntimeError("Message is not bound to an HTTP client")
+        await self._http.pin_message(self.channel_id, self.id)
+        self.pinned = True
+
+    async def unpin(self) -> None:
+        """Unpin this message from the channel.
+
+        Raises:
+            Forbidden: You don't have permission to unpin messages
+            NotFound: The message doesn't exist
+            HTTPException: Unpinning the message failed
+        """
+        if self._http is None:
+            raise RuntimeError("Message is not bound to an HTTP client")
+        await self._http.unpin_message(self.channel_id, self.id)
+        self.pinned = False
+
     # Internal methods for handling reaction updates from gateway events
     def _add_reaction(
         self, data: dict[str, Any], emoji: PartialEmoji, user_id: int

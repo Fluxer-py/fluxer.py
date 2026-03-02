@@ -519,6 +519,55 @@ class HTTPClient:
         payload = {"message_ids": [str(mid) for mid in message_ids]}
         await self.request(route, json=payload)
 
+    # -- Pinned Messages --
+    async def get_pinned_messages(self, channel_id: int | str) -> list[dict[str, Any]]:
+        """GET /channels/{channel_id}/pins - Get all pinned messages in a channel.
+
+        Args:
+            channel_id: The channel ID to get pinned messages from.
+
+        Returns:
+            List of pinned message objects.
+        """
+        route = self._route("GET", "/channels/{channel_id}/pins", channel_id=channel_id)
+        return await self.request(route)
+
+    async def pin_message(self, channel_id: int | str, message_id: int | str) -> None:
+        """PUT /channels/{channel_id}/pins/{message_id} - Pin a message.
+
+        Args:
+            channel_id: The channel ID containing the message.
+            message_id: The message ID to pin.
+
+        Returns:
+            None (204 No Content)
+        """
+        route = self._route(
+            "PUT",
+            "/channels/{channel_id}/pins/{message_id}",
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+        await self.request(route)
+
+    async def unpin_message(self, channel_id: int | str, message_id: int | str) -> None:
+        """DELETE /channels/{channel_id}/pins/{message_id} - Unpin a message.
+
+        Args:
+            channel_id: The channel ID containing the message.
+            message_id: The message ID to unpin.
+
+        Returns:
+            None (204 No Content)
+        """
+        route = self._route(
+            "DELETE",
+            "/channels/{channel_id}/pins/{message_id}",
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+        await self.request(route)
+
     # -- Guilds --
     async def get_guild(self, guild_id: int | str) -> dict[str, Any]:
         """GET /guilds/{guild_id}"""
