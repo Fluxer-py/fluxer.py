@@ -142,7 +142,7 @@ class Channel:
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def fetch_message(self, message_id: int | str) -> Message:
@@ -162,7 +162,7 @@ class Channel:
         data = await self._http.get_message(self.id, message_id)
         msg = Message.from_data(data, self._http)
         msg._channel = self
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def fetch_messages(self, limit: int = 50) -> list[Message]:
@@ -183,7 +183,7 @@ class Channel:
         msgs = [Message.from_data(msg_data, self._http) for msg_data in data]
         for msg in msgs:
             msg._channel = self
-            msg._guild = self._guild
+            msg._cache_guild(self._guild)
         return msgs
 
     async def delete_messages(self, message_ids: list[int | str]) -> None:

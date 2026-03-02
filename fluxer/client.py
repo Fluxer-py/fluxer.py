@@ -257,7 +257,7 @@ class Client:
         if guild_id is not None:
             cached_guild = self._guilds.get(guild_id)
             if cached_guild:
-                msg._guild = cached_guild
+                msg._cache_guild(cached_guild)
         return msg
 
     async def _handle_reaction_add(self, data: dict[str, Any]) -> None:
