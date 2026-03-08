@@ -198,6 +198,14 @@ class Channel:
 
         await self._http.delete_messages(self.id, message_ids)
 
+    async def trigger_typing(self) -> None:
+        """Trigger a typing indicator in this channel."""
+
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+
+        await self._http.trigger_typing(self.id)
+
     async def connect(
         self,
         client: Client,
