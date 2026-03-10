@@ -4,7 +4,7 @@ __author__ = "Emil"
 __license__ = "MIT"
 
 # Core classes
-from .client import Bot, Client
+from .client import Bot, Client, when_mentioned_or, when_mentioned
 from .cog import Cog
 from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
 from .file import File
@@ -59,6 +59,8 @@ __all__ = [
     # Client
     "Bot",
     "Client",
+    "when_mentioned",
+    "when_mentioned_or",
     "Cog",
     "File",
     "HTTPClient",

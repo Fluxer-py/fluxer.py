@@ -6,7 +6,8 @@ import importlib.util
 import inspect
 import logging
 import sys
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from collections.abc import Awaitable, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Coroutine, TypeVar
 
 if TYPE_CHECKING:
     from .voice import VoiceClient
@@ -595,6 +596,12 @@ class Client:
             log.info("Bot stopped by KeyboardInterrupt")
 
 
+BotT = TypeVar("BotT", bound="Bot", covariant=True)
+Prefix = str | Iterable[str]
+PrefixCallable = Callable[[BotT, Message], Prefix | Awaitable[Prefix]]
+PrefixType = Prefix | PrefixCallable
+
+
 class Bot(Client):
     """Extended Client with common bot conveniences.
 
@@ -613,7 +620,7 @@ class Bot(Client):
     def __init__(
         self,
         *,
-        command_prefix: str = "!",
+        command_prefix: PrefixType = "!",
         intents: Intents = Intents.default(),
         api_url: str | None = None,
         max_retries: int = 4,
@@ -660,15 +667,39 @@ class Bot(Client):
 
         return decorator
 
+    async def get_prefix(self, message: Message) -> Prefix:
+        if callable(self.command_prefix):
+            prefix = self.command_prefix(self, message)
+            if inspect.isawaitable(prefix):
+                prefix = await prefix
+            return prefix
+
+        return self.command_prefix
+
+    async def _check_prefix(self, message: Message) -> str | None:
+        prefix = await self.get_prefix(message)
+
+        if isinstance(prefix, str):
+            return prefix if message.content.startswith(prefix) else None
+
+        if isinstance(prefix, Iterable):
+            for p in prefix:
+                if message.content.startswith(p):
+                    return p
+
+        return None
+
     async def _process_commands(self, message: Message) -> None:
         """Check if a message matches a registered command and invoke it."""
         if message.author.bot:
             return
-        if not message.content.startswith(self.command_prefix):
+
+        command_prefix = await self._check_prefix(message)
+        if not command_prefix:
             return
 
         # Parse command name and args
-        content = message.content[len(self.command_prefix) :]
+        content = message.content[len(command_prefix) :]
         # Use list() to avoid RuntimeError if commands dict is modified during iteration
         for cmd, handler in list(self._commands.items()):
             if content.startswith(cmd):
@@ -1037,3 +1068,37 @@ class Bot(Client):
     def extensions(self) -> dict[str, Any]:
         """Get all loaded extensions."""
         return self._extensions.copy()
+
+
+def when_mentioned(bot: Bot, message: Message, /) -> list[str]:
+    """A callable that returns the bot's mention as a prefix.
+
+    Intended for use with command_prefix
+
+        bot = Bot(command_prefix=when_mentioned)
+
+    Returns:
+        A list containing the bot's mention string.
+    """
+    return [f"<@{bot.user.id}> "]
+
+
+def when_mentioned_or(*prefixes: str) -> Callable[[Bot, Message], list[str]]:
+    """A callable that returns the bot's mention and the provided prefixes.
+
+    This is a convenience function that combines when_mentioned
+    with custom prefixes
+
+        bot = Bot(command_prefix=when_mentioned_or("!", "?"))
+
+    Args:
+        *prefixes: Additional prefixes the bot should respond to.
+
+    Returns:
+        A callable suitable for command_prefix.
+    """
+
+    def inner(bot: Bot, message: Message) -> list[str]:
+        return when_mentioned(bot, message) + list(prefixes)
+
+    return inner
