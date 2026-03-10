@@ -1,0 +1,2 @@
+## AI Contributions
+All AI Contributions are banned for Fluxer.py, this is because many people do not understand what AI produces. No matter the size of the change, we will reject any AI contributions.

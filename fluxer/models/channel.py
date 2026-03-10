@@ -142,7 +142,7 @@ class Channel:
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def fetch_message(self, message_id: int | str) -> Message:
@@ -162,7 +162,7 @@ class Channel:
         data = await self._http.get_message(self.id, message_id)
         msg = Message.from_data(data, self._http)
         msg._channel = self
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def fetch_messages(self, limit: int = 50) -> list[Message]:
@@ -180,6 +180,24 @@ class Channel:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         data = await self._http.get_messages(self.id, limit=limit)
+        msgs = [Message.from_data(msg_data, self._http) for msg_data in data]
+        for msg in msgs:
+            msg._channel = self
+            msg._cache_guild(self._guild)
+        return msgs
+
+    async def fetch_pinned_messages(self) -> list[Message]:
+        """Fetch all pinned messages from this channel.
+
+        Returns:
+            A list of pinned Message objects.
+        """
+        from .message import Message
+
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+
+        data = await self._http.get_pinned_messages(self.id)
         msgs = [Message.from_data(msg_data, self._http) for msg_data in data]
         for msg in msgs:
             msg._channel = self

@@ -26,7 +26,7 @@ class Message:
     author: User
     timestamp: str
     edited_timestamp: str | None = None
-    guild_id: int | None = None
+
     embeds: list[dict[str, Any]] = field(default_factory=list)
     attachments: list[Attachment] = field(default_factory=list)
     mentions: list[User] = field(default_factory=list)
@@ -56,7 +56,6 @@ class Message:
             author=author,
             timestamp=data["timestamp"],
             edited_timestamp=data.get("edited_timestamp"),
-            guild_id=int(data["guild_id"]) if data.get("guild_id") else None,
             embeds=data.get("embeds", []),
             attachments=attachments,
             mentions=mentions,
@@ -90,6 +89,11 @@ class Message:
     def guild(self) -> Guild | None:
         """The guild this message was sent in (if cached)."""
         return self._guild
+
+    @property
+    def guild_id(self) -> int | None:
+        """Shortcut for self.guild.id, created for backwards compatiblity"""
+        return self._guild.id if self._guild else None
 
     @staticmethod
     def _process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -166,7 +170,7 @@ class Message:
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self._channel
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def reply(
@@ -223,7 +227,7 @@ class Message:
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self._channel
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def send_to_channel(
@@ -272,7 +276,7 @@ class Message:
             channel_id, content=content, files=file_list, **combined_kwargs
         )
         msg = Message.from_data(data, self._http)
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def edit(self, content: str | None = None, **kwargs: Any) -> Message:
@@ -284,7 +288,7 @@ class Message:
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self._channel
-        msg._guild = self._guild
+        msg._cache_guild(self._guild)
         return msg
 
     async def delete(self) -> None:
@@ -442,6 +446,12 @@ class Message:
                 return reaction
 
         raise ValueError(f"Reaction {emoji} not found on message")
+
+    def _cache_guild(self, guild: Guild | None) -> None:
+        """Set cached guild on this message and referenced_message, since replies can be assumed to be in same guild"""
+        self._guild = guild
+        if self.referenced_message is not None:
+            self.referenced_message._guild = guild
 
     def _clear_emoji(self, emoji: PartialEmoji) -> Reaction | None:
         """Internal method to clear all reactions of a specific emoji.
