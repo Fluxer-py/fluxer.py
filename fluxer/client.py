@@ -1080,7 +1080,7 @@ def when_mentioned(bot: Bot, message: Message, /) -> list[str]:
     Returns:
         A list containing the bot's mention string.
     """
-    return [f"<@{bot.user.id}> "]
+    return [f"<@{bot.user.id}> "]  # type: ignore
 
 
 def when_mentioned_or(*prefixes: str) -> Callable[[Bot, Message], list[str]]:
