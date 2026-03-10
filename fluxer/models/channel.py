@@ -204,7 +204,7 @@ class Channel:
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
-        await self._http.trigger_typing(self.id)
+        return await self._http.trigger_typing(self.id)
 
     async def connect(
         self,

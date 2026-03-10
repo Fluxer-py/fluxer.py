@@ -363,7 +363,7 @@ class HTTPClient:
         )
 
     async def trigger_typing(self, channel_id: int | str) -> None:
-        await self.request(
+        return await self.request(
             self._route("POST", "/channels/{channel_id}/typing", channel_id=channel_id)
         )
 
