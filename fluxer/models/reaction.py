@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import emoji
+
 if TYPE_CHECKING:
     from ..http import HTTPClient
     from .message import Message
@@ -19,15 +21,17 @@ class PartialEmoji:
     name: str | None = None
     id: int | None = None
     animated: bool = False
+    unicode: str | None = None
 
     @classmethod
     def from_data(cls, data: dict[str, Any]) -> PartialEmoji:
         """Create a PartialEmoji from gateway data."""
         emoji_id = data.get("id")
         return cls(
-            name=data.get("name"),
+            name=data.get("name") if emoji_id else emoji.demojize(data.get("name")),
             id=int(emoji_id) if emoji_id else None,
             animated=data.get("animated", False),
+            unicode=data.get("name") if not emoji_id else None,
         )
 
     @property
