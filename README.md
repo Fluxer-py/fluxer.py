@@ -246,17 +246,3 @@ Errors include:
 Full documentation is available at:
 
 https://deepwiki.com/akarealemil/fluxer.py/1-overview
-
----
-
-## Contributing
-
-We use `uv` for dependency management.
-
-```sh
-git clone https://github.com/akarealemil/fluxer.py.git
-cd fluxer.py
-uv sync --dev
-```
-
-This will create a `.venv` and install development dependencies.
