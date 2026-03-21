@@ -67,6 +67,9 @@ class Client:
         """List of guilds the bot is in (populated from READY + GUILD_CREATE)."""
         return list(self._guilds.values())
 
+    def get_guild(self, id: int) -> Guild | None:
+        return self._guilds.get(id)
+
     # =========================================================================
     # Event registration
     # =========================================================================
