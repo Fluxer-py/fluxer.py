@@ -180,6 +180,7 @@ class Guild:
         self,
         user_id: int,
         *,
+        ban_duration_seconds: int = 0,
         delete_message_days: int = 0,
         delete_message_seconds: int = 0,
         reason: str | None = None,
@@ -188,6 +189,7 @@ class Guild:
 
         Args:
             user_id: User ID to ban
+            ban_duration_seconds: Duration of the ban in seconds (0 for permanent, or a valid temporary duration)
             delete_message_days: Number of days to delete messages for (0-7)
             delete_message_seconds: Number of seconds to delete messages for (0-604800)
             reason: Reason for audit log
@@ -198,6 +200,7 @@ class Guild:
         await self._http.ban_guild_member(
             self.id,
             user_id,
+            ban_duration_seconds=ban_duration_seconds,
             delete_message_days=delete_message_days,
             delete_message_seconds=delete_message_seconds,
             reason=reason,

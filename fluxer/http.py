@@ -867,6 +867,7 @@ class HTTPClient:
         guild_id: int | str,
         user_id: int | str,
         *,
+        ban_duration_seconds: int = 0,
         delete_message_days: int = 0,
         delete_message_seconds: int = 0,
         reason: str | None = None,
@@ -876,6 +877,7 @@ class HTTPClient:
         Args:
             guild_id: Guild ID
             user_id: User/Member ID to ban
+            ban_duration_seconds: Duration of the ban in seconds (0 for permanent, or a valid temporary duration)
             delete_message_days: Number of days to delete messages for (0-7, deprecated)
             delete_message_seconds: Number of seconds to delete messages for (0-604800)
             reason: Reason for audit log
@@ -884,6 +886,8 @@ class HTTPClient:
             None (204 No Content)
         """
         payload: dict[str, Any] = {}
+        if ban_duration_seconds > 0:
+            payload["ban_duration_seconds"] = ban_duration_seconds
         if delete_message_days > 0:
             payload["delete_message_days"] = delete_message_days
         if delete_message_seconds > 0:
