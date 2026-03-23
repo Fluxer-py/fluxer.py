@@ -16,8 +16,8 @@ Fixes # <!-- (issue number, delete this if the PR is not issue-related) -->
   - [ ] This Pull Request contains breaking changes (such as removing/renaming methods or parameters)
   - [ ] I ran a Ruff Formatting check
   - [ ] I ran a Type Check
-  <!-- - [ ] My code us properly documented (comments and doc-strings) -->
-  <!-- - [ ] The documentation has been updated according to the changes.  -->
+  <!-- - [ ] My code is properly documented (comments and doc-strings) -->
+  <!-- - [ ] The documentation has been updated according to my changes.  -->
 
 - [ ] This Pull Request fixes an issue.
 - [ ] This Pull Request adds one or more features.
