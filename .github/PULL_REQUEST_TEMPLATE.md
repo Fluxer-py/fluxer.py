@@ -20,4 +20,4 @@ Fixes # <!-- (issue number, delete this if the PR is not issue-related) -->
   <!-- - [ ] The documentation has been updated according to the changes.  -->
 
 - [ ] This Pull Request fixes an issue.
-- [ ] This Pull Request adds one or more things.
+- [ ] This Pull Request adds one or more features.
