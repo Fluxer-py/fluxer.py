@@ -28,7 +28,7 @@ class PartialEmoji:
         """Create a PartialEmoji from gateway data."""
         emoji_id = data.get("id")
         return cls(
-            name=data.get("name") if emoji_id else emoji.demojize(data.get("name")),
+            name=data.get("name") if emoji_id else emoji.demojize(data.get("name", "")),
             id=int(emoji_id) if emoji_id else None,
             animated=data.get("animated", False),
             unicode=data.get("name") if not emoji_id else None,
