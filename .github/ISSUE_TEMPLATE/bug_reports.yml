@@ -3,9 +3,9 @@ description: |
   File a bug report. Please read the whole bug report form before you start filling it out.
 title: "[Bug]: "
 labels: ["bug"]
-# projects: ["octo-org/1", "octo-org/44"]
-# assignees:
-#   - octocat
+assignees:
+  - akarealemil
+  - perpetualpossum  
 
 body:
   - type: markdown
@@ -20,12 +20,13 @@ body:
       description: Which version of Python are you using?
       options:
         - "3.10"
+        - "3.11"
         - "3.12"
         - "3.13"
         - "3.14"
         - "3.15"
         - "3.16"
-      default: 2
+      default: 3
     validations:
       required: true
   - type: textarea
