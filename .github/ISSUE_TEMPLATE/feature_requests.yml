@@ -1,0 +1,56 @@
+name: Feature Request
+description: Suggest a new feature or improvement. Please read the whole feature request form before you start filling it out.
+title: "[Feature]: "
+labels: ["enhancement"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this feature request!
+        Remember to read the whole feature request form before you start filling it out.
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: Type of Feature Request
+      description: Is this feature request related to code implementation or documentation?
+      options:
+        - "Code"
+        - "Documentation"
+      default: 0
+
+  - type: textarea
+    id: feature-description
+    attributes:
+      label: Describe the feature you would like to see implemented.
+      description: Please provide a clear and concise description of the feature you are requesting.
+      placeholder: Describe the feature here...
+    validations:
+      required: true
+
+  - type: textarea
+    id: feature-justification
+    attributes:
+      label: Why do you think this feature would be beneficial?
+      description: Please explain why you think this feature would be useful and how it would improve the project.
+      placeholder: Explain the benefits of this feature...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: duplicates-check
+    attributes:
+      label: No Duplicates
+      description: By submitting this request, you acknowledge that you have searched for existing issues and believe this is not a duplicate of an existing request.
+      options:
+        - label: I believe this is not a duplicate request.
+          required: true
+
+  - type: upload
+    id: attachments
+    attributes:
+      label: Attachments
+      description: If applicable, add any relevant screenshots, mockups, or other files that would help illustrate your feature request.
+    validations:
+      required: false

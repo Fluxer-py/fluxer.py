@@ -1,0 +1,26 @@
+name: Questions
+description: Ask a question about the project, or request help with an issue you're having.
+title: "[Question]: "
+labels: ["question"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Though you can ask your questions here, please note that all questions are meant to be asked on our [Fluxer community](https://fluxer.gg/HniHP9Tw).
+        
+        **Only ask questions here if you think it would be helpful to have it in the issue tracker.**
+
+  - type: input
+    id: question
+    attributes:
+      label: Your Question
+      description: Please ask your question here.
+      placeholder: Enter your question...
+      
+  - type: input
+    id: other
+    attributes:
+      label: Additional Information (Optional)
+      description: Please provide any additional information that might be helpful or related to your question.
+      placeholder: Enter additional information...

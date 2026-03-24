@@ -1,0 +1,101 @@
+name: Form Example
+description: General-purpose example of a GitHub issue form.
+title: "[FORM]: "
+labels: ["triage"]
+projects: ["octo-org/1", "octo-org/44"]
+assignees:
+  - octocat
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Form Example
+
+        Thanks for taking the time to fill this out!  
+        This is a general-purpose form demonstrating all supported field types.
+
+  - type: input
+    id: contact
+    attributes:
+      label: Contact Details
+      description: How can we get in touch with you if we need more information?
+      placeholder: ex. email@example.com
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Provide a detailed explanation of your request or input.
+      placeholder: Tell us more...
+      value: "Example: Describe your request here."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Select the category that best fits your submission.
+      options:
+        - General
+        - Feedback
+        - Request
+        - Other
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Platforms / Environments
+      description: Where does this apply? (Select all that apply)
+      options:
+        - Web
+        - Mobile
+        - Desktop
+        - API
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context or Data
+      description: Add any extra information, logs, or examples if relevant.
+      render: shell
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Please confirm the following before submitting.
+      options:
+        - label: I have reviewed existing issues
+        - label: I have provided sufficient detail
+        - label: This is not a duplicate
+
+  - type: checkboxes
+    id: agreement
+    attributes:
+      label: Agreement
+      description: By submitting this form, you agree to follow project guidelines.
+      options:
+        - label: I agree to follow this project's guidelines
+          required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        📎 You can include links or upload files directly in your submission after creating the issue.
+
+  - type: upload
+    id: screenshots
+    attributes:
+      label: Upload screenshots
+      description: If applicable, add screenshots to help explain your problem.
+    validations:
+      required: false

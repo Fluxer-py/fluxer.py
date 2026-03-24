@@ -1,0 +1,36 @@
+name: "Suggestion"
+description: "Use this template to suggest changes for the project."
+title: "[Suggestion]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: "Thank you for your suggestion! Please fill out the details below to help us understand your idea."
+
+  - type: dropdown
+    id: suggestion-type
+    attributes:
+      label: "Type of Suggestion"
+      description: "Is this suggestion related to code or documentation?"
+      options:
+        - "Code"
+        - "Documentation"
+      default: 0
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "Description"
+      description: "Provide a detailed explanation of your suggestion."
+      placeholder: "e.g., \"Make all bots say 'hiiii' when they start up\""
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: "Reason"
+      description: "Explain why you think this suggestion would be beneficial and how it would improve the project."
+      placeholder: "e.g., \"If all bots say 'hiiii' they will seem happy and that makes me happy :)\""
+    validations:
+      required: true

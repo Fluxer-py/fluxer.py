@@ -1,0 +1,36 @@
+name: "Feedback"
+description: "Use this template to provide feedback about the project."
+title: "[Feedback]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: "Thank you for your feedback! Please fill out the details below to help us understand your thoughts."
+
+  - type: dropdown
+    id: feedback-type
+    attributes:
+      label: "Type of Feedback"
+      description: "Is this feedback related to code or documentation?"
+      options:
+        - "Code"
+        - "Documentation"
+      default: 0
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "Feedback"
+      description: "Provide a detailed description of your feedback."
+      placeholder: "e.g., \"Cog is a funny name for a core feature\""
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: "Impact"
+      description: "Explain how this affects your experience or the project overall."
+      placeholder: "e.g., \"I can't code well because i keep thinking 'haha cog ⚙️'\""
+    validations:
+      required: true

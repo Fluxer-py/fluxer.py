@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & Support
+    url: https://fluxer.gg/HniHP9Tw
+    about: Ask questions or get help directly in Fluxer
+  - name: 📚 Documentation
+    url: https://deepwiki.com/akarealemil/fluxer.py/1-overview
+    about: Read the documentation to learn how to use Fluxer.py
