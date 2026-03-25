@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from fluxer.utils import process_embed_args
 
 from ..enums import ChannelType
 from ..utils import snowflake_to_datetime
@@ -119,12 +120,10 @@ class Channel:
 
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
-
-        embed_list: list[dict[str, Any]] | None = None
-        if embed:
-            embed_list = [embed.to_dict()]
-        elif embeds:
-            embed_list = [e.to_dict() for e in embeds]
+        
+        # Auto-convert single embed to embeds list
+        combined_kwargs = {"embed": embed, "embeds": embeds}
+        combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -136,9 +135,9 @@ class Channel:
         data = await self._http.send_message(
             self.id,
             content=content,
-            embeds=embed_list,
             files=file_list,
             message_reference=message_reference,
+            **combined_kwargs,
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self

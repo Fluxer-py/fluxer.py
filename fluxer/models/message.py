@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+from fluxer.utils import process_embed_args
 
 from ..utils import snowflake_to_datetime
 
@@ -95,36 +96,6 @@ class Message:
         """Shortcut for self.guild.id, created for backwards compatiblity"""
         return self._guild.id if self._guild else None
 
-    @staticmethod
-    def _process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Process embed/embeds arguments to ensure proper format.
-
-        Converts:
-        - embed=Embed(...) -> embeds=[{...}]
-        - embeds=[Embed(...)] -> embeds=[{...}]
-        - embeds=[{...}] -> embeds=[{...}] (no change)
-        """
-        from .embed import Embed
-
-        # Handle singular 'embed' parameter
-        if "embed" in kwargs:
-            embed = kwargs.pop("embed")
-            if embed is not None:
-                # Convert Embed object to dict
-                if isinstance(embed, Embed):
-                    kwargs["embeds"] = [embed.to_dict()]
-                else:
-                    # Assume it's already a dict
-                    kwargs["embeds"] = [embed]
-
-        # Handle plural 'embeds' parameter - convert any Embed objects to dicts
-        if "embeds" in kwargs and kwargs["embeds"] is not None:
-            kwargs["embeds"] = [
-                e.to_dict() if isinstance(e, Embed) else e for e in kwargs["embeds"]
-            ]
-
-        return kwargs
-
     async def send(
         self,
         content: str | None = None,
@@ -153,7 +124,7 @@ class Message:
 
         # Auto-convert single embed to embeds list
         combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
-        combined_kwargs = self._process_embed_args(combined_kwargs)
+        combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -201,7 +172,7 @@ class Message:
 
         # Auto-convert single embed to embeds list
         combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
-        combined_kwargs = self._process_embed_args(combined_kwargs)
+        combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -263,7 +234,7 @@ class Message:
 
         # Auto-convert single embed to embeds list
         combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
-        combined_kwargs = self._process_embed_args(combined_kwargs)
+        combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None

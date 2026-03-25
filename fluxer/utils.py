@@ -5,7 +5,9 @@ import pkgutil
 import re
 from collections.abc import Iterator
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
+
+from .models.embed import Embed
 
 # Fluxer uses the same epoch as Discord: 2015-01-01T00:00:00Z
 FLUXER_EPOCH = 1420070400000
@@ -237,3 +239,31 @@ def search_directory(path: str) -> Iterator[str]:
             yield from search_directory(os.path.join(path, name))
         else:
             yield prefix + name
+
+def process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Process embed/embeds arguments to ensure proper format.
+
+    Converts:
+    - embed=Embed(...) -> embeds=[{...}]
+    - embeds=[Embed(...)] -> embeds=[{...}]
+    - embeds=[{...}] -> embeds=[{...}] (no change)
+    """
+
+    # Handle singular 'embed' parameter
+    if "embed" in kwargs:
+        embed = kwargs.pop("embed")
+        if embed is not None:
+            # Convert Embed object to dict
+            if isinstance(embed, Embed):
+                kwargs["embeds"] = [embed.to_dict()]
+            else:
+                # Assume it's already a dict
+                kwargs["embeds"] = [embed]
+
+    # Handle plural 'embeds' parameter - convert any Embed objects to dicts
+    if "embeds" in kwargs and kwargs["embeds"] is not None:
+        kwargs["embeds"] = [
+            e.to_dict() if isinstance(e, Embed) else e for e in kwargs["embeds"]
+        ]
+
+    return kwargs
