@@ -120,7 +120,7 @@ class Channel:
 
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
-        
+
         # Auto-convert single embed to embeds list
         combined_kwargs = {"embed": embed, "embeds": embeds}
         combined_kwargs = process_embed_args(combined_kwargs)

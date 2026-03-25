@@ -240,6 +240,7 @@ def search_directory(path: str) -> Iterator[str]:
         else:
             yield prefix + name
 
+
 def process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
     """Process embed/embeds arguments to ensure proper format.
 
