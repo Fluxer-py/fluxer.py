@@ -78,3 +78,46 @@ class Embed:
         if self.fields:
             d["fields"] = self.fields
         return d
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Embed:
+        embed = cls(
+            title=data.get("title"),
+            description=data.get("description"),
+            url=data.get("url"),
+            color=data.get("color"),
+            timestamp=data.get("timestamp"),
+        )
+
+        author: dict[str, str] | None = data.get("author")
+        if author is not None:
+            embed.set_author(
+                name=author.get("name"),
+                url=author.get("url"),
+                icon_url=author.get("icon_url")
+            )
+
+        fields: list[dict[str, Any]] = data.get("fields", [])
+        for field in fields:
+            embed.add_field(
+                name=field.get("name"),
+                value=field.get("value"),
+                inline=field.get("inline", False)
+            )
+
+        image: dict[str, Any] | None = data.get("image")
+        if image is not None and "url" in image:
+            embed.set_image(url=image["url"])
+
+        thumbnail: dict[str, Any] | None = data.get("thumbnail")
+        if thumbnail is not None and "url" in thumbnail:
+            embed.set_thumbnail(url=thumbnail["url"])
+
+        footer: dict[str, Any] | None = data.get("footer")
+        if footer is not None:
+            embed.set_footer(
+                text=footer.get("text"),
+                icon_url=footer.get("icon_url")
+            )
+
+        return embed
