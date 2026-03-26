@@ -92,17 +92,17 @@ class Embed:
         author: dict[str, str] | None = data.get("author")
         if author is not None:
             embed.set_author(
-                name=author.get("name"),
+                name=author.get("name", ""),
                 url=author.get("url"),
-                icon_url=author.get("icon_url")
+                icon_url=author.get("icon_url"),
             )
 
         fields: list[dict[str, Any]] = data.get("fields", [])
         for field in fields:
             embed.add_field(
-                name=field.get("name"),
-                value=field.get("value"),
-                inline=field.get("inline", False)
+                name=field.get("name", ""),
+                value=field.get("value", ""),
+                inline=field.get("inline", False),
             )
 
         image: dict[str, Any] | None = data.get("image")
@@ -116,8 +116,7 @@ class Embed:
         footer: dict[str, Any] | None = data.get("footer")
         if footer is not None:
             embed.set_footer(
-                text=footer.get("text"),
-                icon_url=footer.get("icon_url")
+                text=footer.get("text", ""), icon_url=footer.get("icon_url")
             )
 
         return embed
