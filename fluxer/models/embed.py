@@ -98,11 +98,11 @@ class Embed:
             )
 
         fields: list[dict[str, Any]] = data.get("fields", [])
-        for field in fields:
+        for field_data in fields:
             embed.add_field(
-                name=field.get("name", ""),
-                value=field.get("value", ""),
-                inline=field.get("inline", False),
+                name=field_data.get("name", ""),
+                value=field_data.get("value", ""),
+                inline=field_data.get("inline", False),
             )
 
         image: dict[str, Any] | None = data.get("image")
