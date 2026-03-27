@@ -533,6 +533,12 @@ class Client:
         assert self._http is not None
         await self._http.delete_all_reactions_for_emoji(channel_id, message_id, emoji)
 
+    async def setup_hook(self) -> None:
+        """Called before connecting to the gateway.
+
+        Override this to perform setup tasks before the client starts receiving events.
+        """
+
     # =========================================================================
     # Connection lifecycle
     # =========================================================================
@@ -561,6 +567,8 @@ class Client:
             intents=self.intents,
             dispatch=self._dispatch,
         )
+
+        await self.setup_hook()
 
         try:
             await self._gateway.connect()
