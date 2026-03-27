@@ -250,8 +250,7 @@ class Gateway:
     async def _send(self, payload: GatewayPayload) -> None:
         """Send a payload over the WebSocket."""
         if self._ws is None or self._ws.closed:
-            log.warning("Tried to send on closed WebSocket")
-            return
+            raise ConnectionError("Tried to send on closed WebSocket")
         raw = payload.to_json()
         log.debug("Sending: %s", payload)
         await self._ws.send_str(raw)
@@ -326,7 +325,15 @@ class Gateway:
                     return
 
                 self._last_heartbeat_ack = False
-                await self._send_heartbeat()
+                try:
+                    await self._send_heartbeat()
+                except Exception as e:
+                    log.warning(
+                        f"Failed to send heartbeat due to exception: {e}, closing to trigger reconnect"
+                    )
+                    if self._ws and not self._ws.closed:
+                        await self._ws.close(code=4000)
+                    return
                 await asyncio.sleep(self._heartbeat_interval)
         except asyncio.CancelledError:
             pass
