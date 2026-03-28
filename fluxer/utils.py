@@ -268,3 +268,13 @@ def process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
         ]
 
     return kwargs
+
+
+def escape_mentions(text: str) -> str:
+    """A helper function that escapes everyone, here, role, and user mentions.
+
+    .. note::
+
+        This does not include channel mentions.
+    """
+    return re.sub(r"@(everyone|here|[!&]?[0-9]{17,20})", "@\u200b\\1", text)
