@@ -26,5 +26,18 @@
 
 ### Usage steps
 
-> [!NOTE]
-> # WIP
+For this example, follow these steps:
+
+1. Copy the `bot_subclassed` folder somewhere in your computer
+2. Get inside your `bot_subclassed` directory
+3. Open a terminal (Command Prompt, Powershell, Bash, whatever) within your `bot_subclassed` directory
+4. Run `python3 -m venv .venv` to create a [Virtual Environment (venv)](https://docs.python.org/3/library/venv.html)
+5. [Activate](https://docs.python.org/3/library/venv.html#how-venvs-work) your venv
+    - Windows:
+      - For **Command Prompt** Execute `.\.venv\Scripts\activate.bat`
+      - For **Powershell** Execute `.\.venv\Scripts\Activate.ps1` (if it doesn't work just use Command Prompt or read [the python documentation](https://docs.python.org/3/library/venv.html#how-venvs-work))
+    - Bash: Execute `./.venv/bin/activate`
+6. While your venv is active:
+   1. Run `pip install -r requirements.txt` to install the required dependencies for this example
+   2. Run `python3 main.py`
+   3. Enjoy your bot :D
