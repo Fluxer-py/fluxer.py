@@ -1,4 +1,4 @@
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 __title__ = "fluxer.py"
 __author__ = "Emil"
 __license__ = "MIT"
