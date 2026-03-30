@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from fluxer.models.user import User
 
 if TYPE_CHECKING:
-    from ..file import File
+    from .file import File
     from ..http import HTTPClient
     from .message import Message
 

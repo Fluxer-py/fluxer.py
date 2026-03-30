@@ -91,7 +91,6 @@ class LoginFailure(FluxerException):
     """Raised when the bot token is invalid."""
 
 
-# Map HTTP status codes to exception classes
 _STATUS_MAP: dict[int, type[HTTPException]] = {
     400: BadRequest,
     401: Unauthorized,

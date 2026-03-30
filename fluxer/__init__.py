@@ -5,13 +5,13 @@ __license__ = "MIT"
 
 # Core classes
 from .client import Bot, Client, when_mentioned_or, when_mentioned
-from .cog import Cog
+from .commands.cog import Cog
 from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
-from .file import File
+from .models.file import File
 from .http import HTTPClient
 
 # Checks
-from .checks import has_role, has_permission
+from .commands.checks import has_role, has_permission
 
 # Errors
 from .errors import (

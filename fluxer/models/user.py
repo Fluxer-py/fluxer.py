@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any
 from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
-    from ..file import File
+    from .file import File
     from ..http import HTTPClient
-    from .channel import Channel
+    from .channels.channel import Channel
     from .message import Message
 
 
@@ -114,7 +114,7 @@ class User:
         Returns:
             The Channel object for the DM.
         """
-        from .channel import Channel
+        from .channels.channel import Channel
 
         if self._http is None:
             raise RuntimeError("User is not bound to an HTTP client")

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 if TYPE_CHECKING:
-    from .client import Bot
+    from ..client import Bot
 
 EventHandler = Callable[..., Coroutine[Any, Any, None]]
 
@@ -45,24 +45,20 @@ class Cog:
         self._commands: dict[str, EventHandler] = {}
         self._listeners: dict[str, list[EventHandler]] = {}
 
-        # Auto-discover commands and listeners from methods
         self._discover_handlers()
 
     def _discover_handlers(self) -> None:
         """Discover and register all command and listener methods."""
         for name in dir(self):
-            # Skip private/magic methods
             if name.startswith("_"):
                 continue
 
             method = getattr(self, name)
 
-            # Check if it's marked as a command
             if hasattr(method, "__cog_command__"):
                 cmd_name = getattr(method, "__cog_command_name__", name)
                 self._commands[cmd_name] = method
 
-            # Check if it's marked as a listener
             if hasattr(method, "__cog_listener__"):
                 event_name = getattr(method, "__cog_listener_name__", name)
                 if event_name not in self._listeners:
@@ -87,9 +83,9 @@ class Cog:
         """
 
         def decorator(func: EventHandler) -> EventHandler:
-            func.__cog_command__ = True  # type: ignore
+            func.__cog_command__ = True
             if name is not None:
-                func.__cog_command_name__ = name  # type: ignore
+                func.__cog_command_name__ = name
             return func
 
         return decorator
@@ -112,9 +108,9 @@ class Cog:
         """
 
         def decorator(func: EventHandler) -> EventHandler:
-            func.__cog_listener__ = True  # type: ignore
+            func.__cog_listener__ = True
             if name is not None:
-                func.__cog_listener_name__ = name  # type: ignore
+                func.__cog_listener_name__ = name
             return func
 
         return decorator

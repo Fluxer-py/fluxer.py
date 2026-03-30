@@ -8,10 +8,10 @@ from fluxer.models.emoji import Emoji
 from fluxer.models.member import GuildMember
 from fluxer.models.role import Role
 
-from ..utils import snowflake_to_datetime
+from ...utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
-    from ..http import HTTPClient
+    from ...http import HTTPClient
 
 
 @dataclass(slots=True)
@@ -59,16 +59,14 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot fetch emojis without HTTPClient")
 
-        from .emoji import Emoji
+        from ..emoji import Emoji
 
         data = await self._http.get_guild_emojis(self.id)
-        # Pass guild_id when creating emojis since API doesn't always return it
         return [
             Emoji.from_data(emoji_data, self._http, guild_id=self.id)
             for emoji_data in data
         ]
 
-    # -- Role Management Methods --
     async def fetch_roles(self) -> list[Role]:
         """Fetch all roles in this guild.
 
@@ -78,7 +76,7 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot fetch roles without HTTPClient")
 
-        from .role import Role
+        from ..role import Role
 
         data = await self._http.get_guild_roles(self.id)
         return [
@@ -110,7 +108,7 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot create role without HTTPClient")
 
-        from .role import Role
+        from ..role import Role
 
         data = await self._http.create_guild_role(
             self.id,
@@ -122,7 +120,6 @@ class Guild:
         )
         return Role.from_data(data, self._http, guild_id=self.id)
 
-    # -- Member Management Methods --
     async def fetch_member(self, user_id: int) -> GuildMember:
         """Fetch a specific member from this guild.
 
@@ -135,7 +132,7 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot fetch member without HTTPClient")
 
-        from .member import GuildMember
+        from ..member import GuildMember
 
         data = await self._http.get_guild_member(self.id, user_id)
         return GuildMember.from_data(data, self._http, guild_id=self.id)
@@ -155,7 +152,7 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot fetch members without HTTPClient")
 
-        from .member import GuildMember
+        from ..member import GuildMember
 
         data = await self._http.get_guild_members(self.id, limit=limit, after=after)
         return [
@@ -163,7 +160,6 @@ class Guild:
             for member_data in data
         ]
 
-    # -- Moderation Methods --
     async def kick(self, user_id: int, *, reason: str | None = None) -> None:
         """Kick a member from this guild.
 

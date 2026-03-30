@@ -76,7 +76,6 @@ class Gateway:
         self._intents = intents
         self._dispatch = dispatch
 
-        # Connection state
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session: aiohttp.ClientSession | None = None
         self._heartbeat_interval: float = 41.25
@@ -240,7 +239,6 @@ class Gateway:
                 )
                 self._is_closed = True
         except ValueError:
-            # Unknown close code, try to reconnect
             log.warning("Unknown close code %d, attempting reconnect", code)
 
     # =========================================================================
@@ -311,7 +309,6 @@ class Gateway:
 
             await asyncio.sleep(self._heartbeat_interval * random.random())
             while True:
-                # Check if the connection is still active
                 if not self.is_connected:
                     log.debug("WebSocket disconnected, stopping heartbeat loop")
                     return

@@ -11,8 +11,8 @@ if TYPE_CHECKING:
     from ..file import File
     from ..http import HTTPClient
     from .attachment import Attachment
-    from .channel import Channel
-    from .guild import Guild
+    from .channels.channel import Channel
+    from .guild.guild import Guild
     from .reaction import PartialEmoji, Reaction
     from .user import User
 

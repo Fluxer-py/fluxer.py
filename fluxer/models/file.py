@@ -61,7 +61,6 @@ class File:
         else:
             name = "untitled"
 
-        # Add SPOILER_ prefix if spoiler is True
         if self.spoiler and not name.startswith("SPOILER_"):
             name = f"SPOILER_{name}"
 
@@ -73,29 +72,23 @@ class File:
         Returns:
             The file content as bytes.
         """
-        # Handle path string or Path object
         if isinstance(self.fp, (str, Path)):
             with open(self.fp, "rb") as f:
                 return f.read()
 
-        # Handle bytes directly
         elif isinstance(self.fp, bytes):
             return self.fp
 
-        # Handle file-like object (BytesIO, file handle, etc.)
         else:
-            # Save current position if seekable
             if hasattr(self.fp, "seek") and hasattr(self.fp, "tell"):
                 try:
                     self._original_pos = self.fp.tell()
                     self.fp.seek(0)
                 except (OSError, IOError):
-                    # Not seekable, continue anyway
                     pass
 
             data = self.fp.read()
 
-            # Restore position if we saved it
             if self._original_pos is not None:
                 try:
                     self.fp.seek(self._original_pos)

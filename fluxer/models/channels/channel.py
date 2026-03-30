@@ -5,17 +5,17 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from fluxer.utils import process_embed_args
 
-from ..enums import ChannelType
-from ..utils import snowflake_to_datetime
+from ...enums import ChannelType
+from ...utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
-    from ..client import Client
+    from ...client import Client
     from ..file import File
-    from ..http import HTTPClient
-    from ..voice import VoiceClient
-    from .embed import Embed
-    from .guild import Guild
-    from .message import Message
+    from ...http import HTTPClient
+    from ...voice import VoiceClient
+    from ..embed import Embed
+    from ..guild.guild import Guild
+    from ..message import Message
 
 
 @dataclass(slots=True)
@@ -116,7 +116,7 @@ class Channel:
             await channel.send(embed=embed, file=File("data.json"))
         """
         # Import here to avoid circular imports
-        from .message import Message
+        from ..message import Message
 
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
@@ -153,7 +153,7 @@ class Channel:
         Returns:
             The fetched Message object.
         """
-        from .message import Message
+        from ..message import Message
 
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
@@ -173,7 +173,7 @@ class Channel:
         Returns:
             A list of Message objects.
         """
-        from .message import Message
+        from ..message import Message
 
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
@@ -191,7 +191,7 @@ class Channel:
         Returns:
             A list of pinned Message objects.
         """
-        from .message import Message
+        from ..message import Message
 
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")

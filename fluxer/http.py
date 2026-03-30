@@ -37,12 +37,9 @@ class Route:
         self.method = method
         self.path = path
         self.base_url = base_url
-        # Convert all parameters to strings for URL formatting (handles int IDs)
         self.params = {k: str(v) for k, v in params.items()}
         self.url = self.base_url + path.format(**self.params)
 
-        # Rate limit bucket key: method + path template + major params
-        # Major params (channel_id, guild_id) get their own buckets
         self.bucket = f"{method} {path}"
         for key in ("channel_id", "guild_id", "webhook_id"):
             if key in self.params:
@@ -64,7 +61,7 @@ class RateLimiter:
         self._locks: dict[str, asyncio.Lock] = {}
         self._reset_times: dict[str, float] = {}
         self._global_lock = asyncio.Event()
-        self._global_lock.set()  # Not locked initially
+        self._global_lock.set()
 
     def _get_lock(self, bucket: str) -> asyncio.Lock:
         if bucket not in self._locks:
@@ -73,13 +70,11 @@ class RateLimiter:
 
     async def acquire(self, bucket: str) -> None:
         """Wait if this bucket or global rate limit is active."""
-        # Wait for global rate limit to clear
         await self._global_lock.wait()
 
         lock = self._get_lock(bucket)
         await lock.acquire()
 
-        # Check if we need to wait for this bucket
         reset_at = self._reset_times.get(bucket)
         if reset_at is not None:
             now = asyncio.get_event_loop().time()
@@ -141,7 +136,7 @@ class HTTPClient:
     ) -> None:
         self.token = token
         self.is_bot = is_bot
-        self.api_url = api_url.rstrip("/")  # Remove trailing slash if present
+        self.api_url = api_url.rstrip("/")
         self._session: aiohttp.ClientSession | None = None
         self._rate_limiter = RateLimiter()
         self.max_retries = max_retries
@@ -153,7 +148,6 @@ class HTTPClient:
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            # Use "Bot" prefix for bot tokens, plain token for user tokens
             auth_header = f"Bot {self.token}" if self.is_bot else self.token
             self._session = aiohttp.ClientSession(
                 headers={
@@ -222,13 +216,11 @@ class HTTPClient:
                     resp_headers = {k: v for k, v in resp.headers.items()}
                     self._rate_limiter.release(route.bucket, resp_headers)
 
-                    # Success
                     if 200 <= resp.status < 300:
                         if resp.status == 204:
                             return None
                         return await resp.json()
 
-                    # Rate limited
                     if resp.status == 429:
                         body = await resp.json()
                         retry_after = body.get("retry_after", 1.0)
@@ -251,7 +243,6 @@ class HTTPClient:
                             )
                         continue
 
-                    # Server error — retry
                     if resp.status >= 500:
                         log.warning(
                             "Server error %d on %s, retrying (attempt %d)",
@@ -267,7 +258,6 @@ class HTTPClient:
                             )
                         continue
 
-                    # Client error — raise
                     body = await resp.json()
                     raise http_exception_from_status(
                         status=resp.status,
@@ -288,11 +278,7 @@ class HTTPClient:
                 await asyncio.sleep(1 + attempt)
                 continue
 
-    # =========================================================================
-    # Convenience methods for common endpoints
-    # =========================================================================
 
-    # -- Gateway --
     async def get_gateway(self) -> dict[str, Any]:
         """GET /gateway/bot — get the WebSocket URL.
 
@@ -305,7 +291,7 @@ class HTTPClient:
         """GET /gateway/bot — get gateway URL + sharding info."""
         return await self.request(self._route("GET", "/gateway/bot"))
 
-    # -- Users --
+
     async def get_current_user(self) -> dict[str, Any]:
         """GET /users/@me"""
         return await self.request(self._route("GET", "/users/@me"))
@@ -355,7 +341,7 @@ class HTTPClient:
         """GET /users/@me/guilds - get guilds the current user is in"""
         return await self.request(self._route("GET", "/users/@me/guilds"))
 
-    # -- Channels --
+
     async def get_channel(self, channel_id: int | str) -> dict[str, Any]:
         """GET /channels/{channel_id}"""
         return await self.request(
@@ -367,13 +353,13 @@ class HTTPClient:
             self._route("POST", "/channels/{channel_id}/typing", channel_id=channel_id)
         )
 
-    # -- Messages --
+
     async def send_message(
         self,
         channel_id: int | str,
         *,
         content: str | None = None,
-        embed: Any | None = None,  # NEW (single embed support)
+        embed: Any | None = None,
         embeds: list[Any] | None = None,
         files: list[Any] | None = None,
         message_reference: dict[str, Any] | None = None,
@@ -400,13 +386,9 @@ class HTTPClient:
         if content is not None:
             payload["content"] = content
 
-        # --- Normalize embed(s) ---
-
-        # Support single embed param
         if embed is not None:
             embeds = [embed]
 
-        # Normalize all embeds
         if embeds is not None:
             normalized = []
             for e in embeds:
@@ -419,7 +401,6 @@ class HTTPClient:
         if message_reference is not None:
             payload["message_reference"] = message_reference
 
-        # --- File handling ---
         if files:
             form = aiohttp.FormData()
 
@@ -524,7 +505,6 @@ class HTTPClient:
         payload = {"message_ids": [str(mid) for mid in message_ids]}
         await self.request(route, json=payload)
 
-    # -- Pinned Messages --
     async def get_pinned_messages(self, channel_id: int | str) -> list[dict[str, Any]]:
         """GET /channels/{channel_id}/pins - Get all pinned messages in a channel.
 
@@ -573,7 +553,7 @@ class HTTPClient:
         )
         await self.request(route)
 
-    # -- Guilds --
+
     async def get_guild(self, guild_id: int | str) -> dict[str, Any]:
         """GET /guilds/{guild_id}"""
         return await self.request(
@@ -632,9 +612,7 @@ class HTTPClient:
         payload: dict[str, Any] = {"name": name}
 
         if icon:
-            # Convert bytes to base64 data URI
             image_data = base64.b64encode(icon).decode("ascii")
-            # Detect image format from header
             if icon.startswith(b"\x89PNG"):
                 mime_type = "image/png"
             elif icon.startswith(b"\xff\xd8\xff"):
@@ -642,7 +620,7 @@ class HTTPClient:
             elif icon.startswith(b"GIF89a") or icon.startswith(b"GIF87a"):
                 mime_type = "image/gif"
             else:
-                mime_type = "image/png"  # Default
+                mime_type = "image/png"
 
             payload["icon"] = f"data:{mime_type};base64,{image_data}"
 
@@ -687,7 +665,7 @@ class HTTPClient:
             self._route("PATCH", "/guilds/{guild_id}", guild_id=guild_id), json=payload
         )
 
-    # -- Roles --
+
     async def get_guild_roles(self, guild_id: int | str) -> list[dict[str, Any]]:
         """GET /guilds/{guild_id}/roles"""
         return await self.request(
@@ -773,7 +751,7 @@ class HTTPClient:
             )
         )
 
-    # -- Member Role Management --
+
     async def add_guild_member_role(
         self,
         guild_id: int | str,
@@ -834,7 +812,7 @@ class HTTPClient:
             reason=reason,
         )
 
-    # -- Moderation --
+
     async def kick_guild_member(
         self,
         guild_id: int | str,
@@ -1023,7 +1001,7 @@ class HTTPClient:
             reason=reason,
         )
 
-    # -- Channels (create/modify) --
+
     async def create_guild_channel(
         self,
         guild_id: int | str,
@@ -1160,7 +1138,7 @@ class HTTPClient:
             json=payload,
         )
 
-    # -- User Profile --
+
     async def modify_current_user(
         self,
         *,
@@ -1216,7 +1194,7 @@ class HTTPClient:
 
         return await self.request(self._route("PATCH", "/users/@me"), json=payload)
 
-    # -- Emojis --
+
     async def get_guild_emojis(self, guild_id: int | str) -> list[dict[str, Any]]:
         """GET /guilds/{guild_id}/emojis — Get all emojis for a guild.
 
@@ -1267,10 +1245,8 @@ class HTTPClient:
         """
         import base64
 
-        # Convert bytes to base64 data URI
         image_data = base64.b64encode(image).decode("ascii")
 
-        # Detect image format from header
         if image.startswith(b"\x89PNG"):
             mime_type = "image/png"
         elif image.startswith(b"\xff\xd8\xff"):
@@ -1278,7 +1254,7 @@ class HTTPClient:
         elif image.startswith(b"GIF89a") or image.startswith(b"GIF87a"):
             mime_type = "image/gif"
         else:
-            mime_type = "image/png"  # Default
+            mime_type = "image/png"
 
         payload: dict[str, Any] = {
             "name": name,
@@ -1318,7 +1294,7 @@ class HTTPClient:
             reason=reason,
         )
 
-    # -- Stickers --
+
     async def get_guild_stickers(self, guild_id: int | str) -> list[dict[str, Any]]:
         """GET /guilds/{guild_id}/stickers — Get all stickers for a guild.
 
@@ -1369,10 +1345,8 @@ class HTTPClient:
         """
         import base64
 
-        # Convert bytes to base64 data URI
         image_data = base64.b64encode(image).decode("ascii")
 
-        # Detect image format from header
         if image.startswith(b"\x89PNG"):
             mime_type = "image/png"
         elif image.startswith(b"\xff\xd8\xff"):
@@ -1380,7 +1354,7 @@ class HTTPClient:
         elif image.startswith(b"GIF89a") or image.startswith(b"GIF87a"):
             mime_type = "image/gif"
         else:
-            mime_type = "image/png"  # Default
+            mime_type = "image/png"
 
         payload: dict[str, Any] = {
             "name": name,
@@ -1420,7 +1394,7 @@ class HTTPClient:
             reason=reason,
         )
 
-    # ~~ Webhooks ~
+
     async def get_guild_webhooks(self, guild_id: int | str) -> list[dict[str, Any]]:
         """GET /guilds/{guild_id}/webhooks"""
         return await self.request(
@@ -1592,7 +1566,7 @@ class HTTPClient:
             params=params,
         )
 
-    # -- Reactions --
+
     def _emoji_to_url_format(self, emoji: Any) -> str:
         """Convert an emoji object to URL format for reaction endpoints.
 
@@ -1606,29 +1580,20 @@ class HTTPClient:
         import emoji as emoji_lib
         import urllib.parse
 
-        # Handle PartialEmoji or Emoji objects
         if hasattr(emoji, "id") and emoji.id:
-            # Custom emoji: name:id (no encoding needed)
             return f"{emoji.name}:{emoji.id}"
         elif hasattr(emoji, "name") and emoji.name:
-            # Unicode emoji from PartialEmoji
             return urllib.parse.quote(emoji.name, safe="")
         else:
-            # Handle string emojis
             emoji_str = str(emoji)
 
-            # Check for custom emoji format: <:name:id> or <a:name:id>
             custom_emoji_match = re.match(r"^<a?:([^:]+):(\d+)>$", emoji_str)
             if custom_emoji_match:
-                # Extract name and id, return as name:id
                 name, emoji_id = custom_emoji_match.groups()
                 return f"{name}:{emoji_id}"
 
-            # Convert shortcode to unicode emoji (e.g., :joy: → 😂)
-            # emojize will convert :joy: to 😂, but leave 😂 as-is
             emoji_str = emoji_lib.emojize(emoji_str, language="alias")
 
-            # URL-encode the result
             return urllib.parse.quote(emoji_str, safe="")
 
     async def add_reaction(

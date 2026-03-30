@@ -19,7 +19,6 @@ from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webh
 
 log = logging.getLogger(__name__)
 
-# Type alias for event handlers
 EventHandler = Callable[..., Coroutine[Any, Any, None]]
 
 

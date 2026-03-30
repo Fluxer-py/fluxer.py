@@ -1,7 +1,7 @@
 from bot import MyBot
 import fluxer
 from fluxer import Cog
-from fluxer.checks import has_permission
+from fluxer.commands.checks import has_permission
 import logging
 
 logger = logging.getLogger(__name__)

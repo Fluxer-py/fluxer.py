@@ -4,9 +4,9 @@ import asyncio
 import functools
 from typing import Callable, Coroutine, Any
 
-from .enums import Permissions
-from .models.member import GuildMember
-from .models.message import Message
+from ..enums import Permissions
+from ..models import GuildMember
+from ..models import Message
 
 EventHandler = Callable[..., Coroutine[Any, Any, None]]
 
