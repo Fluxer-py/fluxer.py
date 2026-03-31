@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..http import HTTPClient
+    from ...http import HTTPClient
 
-from .user import User
+from ..user import User
 
 
 @dataclass(slots=True)

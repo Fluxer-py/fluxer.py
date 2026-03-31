@@ -5,16 +5,16 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from fluxer.utils import process_embed_args
 
-from ..utils import snowflake_to_datetime
+from ...utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
-    from ..file import File
-    from ..http import HTTPClient
+    from ...models.file import File
+    from ...http import HTTPClient
     from .attachment import Attachment
-    from .channels.channel import Channel
-    from .guild.guild import Guild
+    from ..channels.channel import Channel
+    from ..guild.guild import Guild
     from .reaction import PartialEmoji, Reaction
-    from .user import User
+    from ..user import User
 
 
 @dataclass(slots=True)

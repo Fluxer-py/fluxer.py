@@ -4,10 +4,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from ..utils import snowflake_to_datetime
+from ...utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
-    from ..http import HTTPClient
+    from ...http import HTTPClient
 
 
 @dataclass(slots=True)

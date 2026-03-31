@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from .member import GuildMember
+from .guild.member import GuildMember
 
 if TYPE_CHECKING:
     from ..http import HTTPClient

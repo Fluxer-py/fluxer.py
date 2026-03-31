@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
-from .models.embed import Embed
+from .models.messaging.embed import Embed
 
 import aiohttp
 import json as json_mod

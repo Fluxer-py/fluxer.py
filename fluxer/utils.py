@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from .models.embed import Embed
+from .models.messaging.embed import Embed
 
 FLUXER_EPOCH = 1420070400000
 

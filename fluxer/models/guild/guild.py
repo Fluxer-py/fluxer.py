@@ -5,8 +5,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from fluxer.models.emoji import Emoji
-from fluxer.models.member import GuildMember
-from fluxer.models.role import Role
+from .member import GuildMember
+from .role import Role
 
 from ...utils import snowflake_to_datetime
 

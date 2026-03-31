@@ -1,19 +1,19 @@
-from .attachment import Attachment
+from .messaging.attachment import Attachment
 from .channels.channel import Channel
-from .embed import Embed
+from .messaging.embed import Embed
 from .emoji import Emoji
 from .guild.guild import Guild
-from .member import GuildMember
-from .message import Message
+from .guild.member import GuildMember
+from .messaging.message import Message
 from .profile import UserProfile
-from .reaction import (
+from .messaging.reaction import (
     PartialEmoji,
     RawReactionActionEvent,
     RawReactionClearEmojiEvent,
     RawReactionClearEvent,
     Reaction,
 )
-from .role import Role
+from .guild.role import Role
 from .user import User
 from .voice import VoiceState
 from .webhook import Webhook
