@@ -28,8 +28,13 @@ Every Pull Request is automatically checked through a workflow for formatting an
 
 - **For format checking**: `uv run ruff format --check`
   - (it should say something like *"30 files already formatted"*)
+- **For lint checks**: `uv run ruff check .`
+  - (it should say *"All checks passed!"*)
 - **For type checking**: `uv run pyright .`
   - (it should say *"0 errors, 0 warnings, 0 informations"*)
+
+> [!TIP]
+> You can copy the [pre-commit hook](https://github.com/akarealemil/fluxer.py/blob/main/.github/pre-commit.copy) into your `./.git/hooks/` directory, so these checks run automatically every time you try to commit!
 
 > [!TIP]
 > If the format check fails, you can fix it by running `uv run ruff format`

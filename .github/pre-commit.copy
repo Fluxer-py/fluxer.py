@@ -1,0 +1,43 @@
+#!/bin/bash
+
+echo "Running checks..."
+
+FAILED=0
+
+echo "▶ Running pyright (uv run pyright .)..."
+uv run pyright .
+if [ $? -ne 0 ]; then
+  echo "❌ pyright failed - run `uv run pyright .` to see details"
+  FAILED=1
+else
+  echo "✅ pyright passed"
+fi
+
+echo "▶ Running ruff check (uv run ruff check .)..."
+uv run ruff check .
+if [ $? -ne 0 ]; then
+  echo "❌ ruff check failed - run `uv run ruff check .` to see details"
+  FAILED=1
+else
+  echo "✅ ruff check passed"
+fi
+
+echo "▶ Running ruff format check (uv run ruff format --check)..."
+uv run ruff format --check
+if [ $? -ne 0 ]; then
+  echo "❌ ruff format failed - run `uv run ruff format --check` to see details"
+  FAILED=1
+else
+  echo "✅ ruff format passed"
+fi
+
+# Final decision
+if [ $FAILED -ne 0 ]; then
+  echo ""
+  echo "🚫 Commit blocked: fix the errors above."
+  exit 1
+fi
+
+echo ""
+echo "🎉 All checks passed!"
+exit 0
