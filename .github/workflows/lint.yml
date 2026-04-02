@@ -3,8 +3,12 @@ name: Linting
 on:
   push:
     branches: [main, test, dev]
+    paths:
+    - '**.py'
   pull_request:
     branches: [main, development]
+    paths:
+    - '**.py'
   workflow_dispatch:
 
 jobs:
