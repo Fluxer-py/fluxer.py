@@ -9,6 +9,8 @@ import sys
 from collections.abc import Awaitable, Iterable
 from typing import TYPE_CHECKING, Any, Callable, Coroutine, TypeVar
 
+from fluxer.context import Context
+
 if TYPE_CHECKING:
     from .voice import VoiceClient
 
@@ -718,7 +720,9 @@ class Bot(Client):
                     try:
                         # Parse arguments based on function signature
                         args_str = content[len(cmd) :].strip()
-                        await self._invoke_command(handler, message, args_str)
+                        await self._invoke_command(
+                            handler, message, args_str, command_prefix
+                        )
                     except TypeError as e:
                         # Handle missing required arguments
                         if "missing" in str(e) and "required" in str(e):
@@ -730,7 +734,11 @@ class Bot(Client):
                     break
 
     async def _invoke_command(
-        self, handler: EventHandler, message: Message, args_str: str
+        self,
+        handler: EventHandler,
+        message: Message,
+        args_str: str,
+        command_prefix: str,
     ) -> None:
         """Parse arguments and invoke a command handler.
 
@@ -743,10 +751,16 @@ class Bot(Client):
         sig = inspect.signature(handler)
         params = list(sig.parameters.values())
 
-        # First parameter is always the ctx (context/message)
+        ctx = Context(
+            message=message,
+            bot=self,
+            prefix=command_prefix,
+        )
+
+        # First parameter is always the ctx (context)
         if not params or params[0].name != "ctx":
-            # If function doesn't take ctx as first param, just pass message
-            await handler(message)
+            # If function doesn't take ctx as first param
+            await handler(ctx)
             return
 
         # Remove the ctx parameter from processing
@@ -754,7 +768,7 @@ class Bot(Client):
 
         # Check if there are any parameters that need parsing
         if not params:
-            await handler(message)
+            await handler(ctx)
             return
 
         # Check for keyword-only parameters (indicated by * in signature)
@@ -773,19 +787,26 @@ class Bot(Client):
 
             # Use default if no args provided
             if not args_str:
-                await handler(message)
+                await handler(ctx)
                 return
 
             # Convert to the appropriate type if type hint exists
             value = self._convert_argument(args_str, param.annotation)
-            await handler(message, **{param.name: value})
+            kwargs = {param.name: value}
+            ctx = Context(
+                message=message,
+                bot=self,
+                prefix=command_prefix,
+                kwargs=kwargs,
+            )
+            await handler(ctx, **kwargs)
         else:
             # Multiple positional or mixed arguments
             # Split args_str into individual arguments
             args = args_str.split() if args_str else []
 
             # Build the argument list
-            call_args = [message]
+            call_args = []
             call_kwargs = {}
 
             for i, param in enumerate(params):
@@ -812,8 +833,14 @@ class Bot(Client):
                         raise TypeError(
                             f"{handler.__name__}() missing 1 required positional argument: '{param.name}'"
                         )
-
-            await handler(*call_args, **call_kwargs)
+            ctx = Context(
+                message=message,
+                bot=self,
+                prefix=command_prefix,
+                args=call_args,
+                kwargs=call_kwargs,
+            )
+            await handler(ctx, *call_args, **call_kwargs)
 
     def _convert_argument(self, value: str, annotation: Any) -> Any:
         """Convert a string argument to the appropriate type based on annotation."""

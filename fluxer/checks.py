@@ -4,6 +4,8 @@ import asyncio
 import functools
 from typing import Callable, Coroutine, Any
 
+from fluxer import Context
+
 from .enums import Permissions
 from .models.member import GuildMember
 from .models.message import Message
@@ -41,36 +43,37 @@ def has_role(
             # Make this compatible with both standalone commands and cog methods by checking
             # if the first argument is a bot instance (Cog) or a context object (standalone)
             a: list[Any] = list(args)
-            ctx: Message = a[1] if a and hasattr(a[0], "bot") else a[0]
+            ctx: Context = a[1] if a and hasattr(a[0], "bot") else a[0]
+            msg: Message = ctx.message
 
-            if ctx.guild_id is None:
-                await ctx.reply("This command can only be used in a server.")
+            if msg.guild_id is None:
+                await msg.reply("This command can only be used in a server.")
                 return
 
             if name is None and id is None:
-                await ctx.reply("Invalid role requirement configuration.")
+                await msg.reply("Invalid role requirement configuration.")
                 return
 
-            if ctx._http is None:
+            if msg._http is None:
                 raise RuntimeError("HTTPClient is required to check roles")
 
-            member_data = await ctx._http.get_guild_member(ctx.guild_id, ctx.author.id)
+            member_data = await msg._http.get_guild_member(msg.guild_id, msg.author.id)
 
             role_id: int | None = None
             if id is not None:
                 role_id = int(id)
             elif name is not None:
-                roles_data = await ctx._http.get_guild_roles(ctx.guild_id)
+                roles_data = await msg._http.get_guild_roles(msg.guild_id)
                 role_id = next(
                     (int(r["id"]) for r in roles_data if r["name"] == name),
                     None,
                 )
 
-            member = GuildMember.from_data(member_data, ctx._http)
+            member = GuildMember.from_data(member_data, msg._http)
             authorized = role_id is not None and member.has_role(role_id)
 
             if not authorized:
-                await ctx.reply("You don't have permission to use this command.")
+                await msg.reply("You don't have permission to use this command.")
                 return
 
             await func(*args, **kwargs)
@@ -112,23 +115,24 @@ def has_permission(permission: Permissions) -> Callable[[EventHandler], EventHan
             # Make this compatible with both standalone commands and cog methods by checking
             # if the first argument is a bot instance (Cog) or a context object (standalone)
             a: list[Any] = list(args)
-            ctx: Message = a[1] if a and hasattr(a[0], "bot") else a[0]
+            ctx: Context = a[1] if a and hasattr(a[0], "bot") else a[0]
+            msg: Message = ctx.message
 
-            if ctx.guild_id is None:
-                await ctx.reply("This command can only be used in a server.")
+            if msg.guild_id is None:
+                await msg.reply("This command can only be used in a server.")
                 return
 
-            if ctx._http is None:
+            if msg._http is None:
                 raise RuntimeError("HTTPClient is required to check permissions")
 
             guild_data, member_data, roles_data = await asyncio.gather(
-                ctx._http.get_guild(ctx.guild_id),
-                ctx._http.get_guild_member(ctx.guild_id, ctx.author.id),
-                ctx._http.get_guild_roles(ctx.guild_id),
+                msg._http.get_guild(msg.guild_id),
+                msg._http.get_guild_member(msg.guild_id, msg.author.id),
+                msg._http.get_guild_roles(msg.guild_id),
             )
 
             # If the user is the guild owner, they bypass all permission checks
-            if ctx.author.id == int(guild_data["owner_id"]):
+            if msg.author.id == int(guild_data["owner_id"]):
                 await func(*args, **kwargs)
                 return
 
@@ -136,7 +140,7 @@ def has_permission(permission: Permissions) -> Callable[[EventHandler], EventHan
             computed = 0
             for role in roles_data:
                 role_id = int(role["id"])
-                if role_id == ctx.guild_id or role_id in member_role_ids:
+                if role_id == msg.guild_id or role_id in member_role_ids:
                     computed |= int(role["permissions"])
 
             # If a user has admin, they bypass all permission checks
@@ -145,7 +149,7 @@ def has_permission(permission: Permissions) -> Callable[[EventHandler], EventHan
                 return
 
             if (computed & int(permission)) != int(permission):
-                await ctx.reply("You don't have permission to use this command.")
+                await msg.reply("You don't have permission to use this command.")
                 return
 
             await func(*args, **kwargs)

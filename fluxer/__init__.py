@@ -9,6 +9,7 @@ from .cog import Cog
 from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
 from .file import File
 from .http import HTTPClient
+from .context import Context
 
 # Checks
 from .checks import has_role, has_permission
@@ -100,4 +101,5 @@ __all__ = [
     # Voice (present only when the 'voice' extra is installed)
     "FFmpegPCMAudio",
     "VoiceClient",
+    "Context",
 ]
