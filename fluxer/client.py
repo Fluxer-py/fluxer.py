@@ -42,6 +42,7 @@ class Client:
         api_url: str | None = None,
         max_retries: int = 5,
         retry_forever: bool = False,
+        presence: ClientPresence | None = None,
     ) -> None:
         self.intents = intents
         self.api_url = api_url
@@ -56,6 +57,7 @@ class Client:
         self._closed: bool = False
         self._max_retries = max_retries
         self._retry_forever = retry_forever
+        self._presence = presence if presence is not None else ClientPresence()
 
     @property
     def user(self) -> User | None:
@@ -413,6 +415,17 @@ class Client:
         data = await self._http.create_webhook(channel_id, name=name, avatar=avatar)
         return Webhook.from_data(data, self._http)
 
+    async def update_presence(self, new_presence: ClientPresence) -> None:
+        """Update the client's presence (status and custom_status).
+
+        Note that there's a relatively low rate limit, so if this fails, you should consider waiting a bit between presence updates.
+        """
+        self._presence = new_presence
+        if self._gateway and self._gateway.is_connected:
+            await self._gateway.update_presence(new_presence)
+        else:
+            log.warning("Cannot update presence: not connected to gateway")
+
     # =========================================================================
     # Voice methods
     # =========================================================================
@@ -566,6 +579,7 @@ class Client:
             token=token,
             intents=self.intents,
             dispatch=self._dispatch,
+            presence=self._presence,
         )
 
         await self.setup_hook()
@@ -636,12 +650,14 @@ class Bot(Client):
         api_url: str | None = None,
         max_retries: int = 4,
         retry_forever: bool = False,
+        presence: ClientPresence | None = None,
     ) -> None:
         super().__init__(
             intents=intents,
             api_url=api_url,
             max_retries=max_retries,
             retry_forever=retry_forever,
+            presence=presence,
         )
         self.command_prefix = command_prefix
         self._commands: dict[str, EventHandler] = {}
@@ -1117,3 +1133,77 @@ def when_mentioned_or(*prefixes: str) -> Callable[[Bot, Message], list[str]]:
         return when_mentioned(bot, message) + list(prefixes)
 
     return inner
+
+
+class ClientPresence:
+    """
+    status: The current online status (online, idle, dnd, invisible, offline)
+
+    afk: Whether the user is marked as AFK
+
+    custom_status: The custom status set by the user
+    """
+
+    class CustomStatus:
+        """
+        text: The custom status text
+
+        emoji_id: The ID of the custom emoji used in the status
+
+        emoji_name: The name of the emoji used in the status
+
+        expires_at: ISO8601 timestamp when the custom status expires
+        """
+
+        def __init__(
+            self,
+            text: str | None = None,
+            emoji_id: int | str | None = None,
+            emoji_name: str | None = None,
+            expires_at: str | None = None,
+        ) -> None:
+            self.text: str | None = text
+            if self.text is None and any(
+                [
+                    x is not None
+                    for x in [self.emoji_id, self.emoji_name, self.expires_at]
+                ]
+            ):
+                raise ValueError(
+                    "Custom status text cannot be None while emoji_id, emoji_name, or expires_at is set"
+                )
+            self.emoji_id: int | str | None = emoji_id
+            if self.emoji_id is not None:
+                self.emoji_id = f"{emoji_id}"  # Ensure emoji_id is a string
+            self.emoji_name: str | None = emoji_name
+            self.expires_at: str | None = expires_at
+
+        def to_dict(self) -> dict[str, Any]:
+            return {
+                "text": self.text,
+                "emoji_id": self.emoji_id,
+                "emoji_name": self.emoji_name,
+            }
+
+    def __init__(
+        self,
+        *,
+        status: str = "online",
+        custom_status: CustomStatus | str | None = None,
+        afk: bool = False,
+    ) -> None:
+        self.status: str = status
+        self.custom_status: ClientPresence.CustomStatus | None
+        if isinstance(custom_status, str):
+            self.custom_status = ClientPresence.CustomStatus(text=custom_status)
+        else:
+            self.custom_status = custom_status
+        self.afk: bool = afk
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "custom_status": self.custom_status.to_dict()
+            if self.custom_status
+            else None,
+            "status": self.status,
+        }
