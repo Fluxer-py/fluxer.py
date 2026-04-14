@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import sys
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, TYPE_CHECKING
 
 import aiohttp
 
@@ -12,6 +12,9 @@ from .enums import GatewayCloseCode, GatewayOpcode, Intents
 from .errors import GatewayNotConnected
 
 log = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from fluxer.client import ClientPresence
 
 
 class GatewayPayload:
@@ -69,12 +72,14 @@ class Gateway:
         http_client: Any,
         token: str,
         intents: Intents,
+        presence: ClientPresence | None = None,
         dispatch: Callable[[str, Any], Coroutine[Any, Any, None]],
     ) -> None:
         self._http = http_client
         self._token = token
         self._intents = intents
         self._dispatch = dispatch
+        self._presence = presence if presence else ClientPresence()
 
         # Connection state
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -267,8 +272,10 @@ class Gateway:
                     "browser": "fluxer.py",
                     "device": "fluxer.py",
                 },
+                "presence": self._presence.to_dict(),
             },
         )
+        print(json.dumps({"op": payload.op, "d": payload.d}, indent=2))
         await self._send(payload)
         log.info("Sent IDENTIFY")
 
@@ -353,24 +360,17 @@ class Gateway:
 
     async def update_presence(
         self,
-        *,
-        status: str = "online",
-        activity_name: str | None = None,
-        activity_type: int = 0,
+        presence: ClientPresence,
     ) -> None:
-        """Update the bot's presence/status."""
-        activity = None
-        if activity_name:
-            activity = {"name": activity_name, "type": activity_type}
+        """Update the bot's presence/status.
+
+        Note that there's a relatively low rate limit, so if this fails, you should consider waiting a bit between presence updates.
+        """
+        self._presence = presence
 
         payload = GatewayPayload(
             op=GatewayOpcode.PRESENCE_UPDATE,
-            d={
-                "since": None,
-                "activities": [activity] if activity else [],
-                "status": status,
-                "afk": False,
-            },
+            d=self._presence.to_dict(),
         )
         await self._send(payload)
 

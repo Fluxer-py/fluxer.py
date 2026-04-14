@@ -4,7 +4,7 @@ __author__ = "Emil"
 __license__ = "MIT"
 
 # Core classes
-from .client import Bot, Client, when_mentioned_or, when_mentioned
+from .client import Bot, Client, when_mentioned_or, when_mentioned, ClientPresence
 from .cog import Cog
 from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
 from .file import File
@@ -100,4 +100,5 @@ __all__ = [
     # Voice (present only when the 'voice' extra is installed)
     "FFmpegPCMAudio",
     "VoiceClient",
+    "ClientPresence",
 ]
