@@ -1549,6 +1549,7 @@ class HTTPClient:
         embeds: list[dict[str, Any]] | None = None,
         username: str | None = None,
         avatar_url: str | None = None,
+        message_reference: dict[str, Any] | None = None,
         wait: bool = False,
         files: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
@@ -1568,6 +1569,8 @@ class HTTPClient:
             payload["username"] = username
         if avatar_url is not None:
             payload["avatar_url"] = avatar_url
+        if message_reference is not None:
+            payload["message_reference"] = message_reference
         params = {"wait": "true"} if wait else None
         if files:
             form = aiohttp.FormData()
