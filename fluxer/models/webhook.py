@@ -88,6 +88,7 @@ class Webhook:
         avatar_url: str | None = None,
         file: File | None = None,
         files: list[File] | None = None,
+        message_reference: dict[str, Any] | None = None,
         wait: bool = False,
     ) -> Message | None:
         """Send a message with this webhook.
@@ -99,6 +100,7 @@ class Webhook:
             avatar_url: Override the webhook's default avatar.
             file: A single File object to attach.
             files: Multiple File objects to attach.
+            message_reference: Reference to another message for replies.
             wait: If True, returns the created Message.
 
         Returns:
@@ -120,6 +122,7 @@ class Webhook:
             embeds=embeds,
             username=username,
             avatar_url=avatar_url,
+            message_reference=message_reference,
             wait=wait,
             files=file_list,
         )
