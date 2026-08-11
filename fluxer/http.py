@@ -524,6 +524,20 @@ class HTTPClient:
         payload = {"message_ids": [str(mid) for mid in message_ids]}
         await self.request(route, json=payload)
 
+    async def suppress_message_embeds(
+        self, channel_id: int | str, message_id: int | str, flags: int
+    ) -> dict[str, Any]:
+        """PATCH /channels/{channel_id}/messages/{message_id}"""
+        route = self._route(
+            "PATCH",
+            "/channels/{channel_id}/messages/{message_id}",
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+        payload: dict[str, Any] = {"flags": flags | 4}
+        # bit 4 is the embed suppression flag
+        return await self.request(route, json=payload)
+
     # -- Pinned Messages --
     async def get_pinned_messages(self, channel_id: int | str) -> list[dict[str, Any]]:
         """GET /channels/{channel_id}/pins - Get all pinned messages in a channel.
