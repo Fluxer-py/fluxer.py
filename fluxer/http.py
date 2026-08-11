@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from typing import Any
-from .models.embed import Embed
+import re
+import emoji as emoji_lib
+import urllib.parse
 
 import aiohttp
 import json as json_mod
 
 from .errors import http_exception_from_status
+
 
 log = logging.getLogger(__name__)
 
@@ -373,8 +377,7 @@ class HTTPClient:
         channel_id: int | str,
         *,
         content: str | None = None,
-        embed: Any | None = None,  # NEW (single embed support)
-        embeds: list[Any] | None = None,
+        embeds: list[dict[str, Any]] | None = None,
         files: list[Any] | None = None,
         message_reference: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -383,8 +386,7 @@ class HTTPClient:
         Args:
             channel_id: The channel to send the message to
             content: The message content
-            embed: Single embed object (optional)
-            embeds: List of embed objects (Embed or dict)
+            embeds: List of dict embed objects
             files: List of file objects to attach
             message_reference: Reference to another message for replies
                 Example: {"message_id": "123456789", "channel_id": "987654321"}
@@ -400,21 +402,8 @@ class HTTPClient:
         if content is not None:
             payload["content"] = content
 
-        # --- Normalize embed(s) ---
-
-        # Support single embed param
-        if embed is not None:
-            embeds = [embed]
-
-        # Normalize all embeds
         if embeds is not None:
-            normalized = []
-            for e in embeds:
-                if isinstance(e, Embed):
-                    normalized.append(e.to_dict())
-                else:
-                    normalized.append(e)
-            payload["embeds"] = normalized
+            payload["embeds"] = embeds
 
         if message_reference is not None:
             payload["message_reference"] = message_reference
@@ -627,7 +616,6 @@ class HTTPClient:
         Returns:
             Guild object
         """
-        import base64
 
         payload: dict[str, Any] = {"name": name}
 
@@ -663,7 +651,6 @@ class HTTPClient:
         **kwargs: Any,
     ) -> dict[str, Any]:
         """PATCH /guilds/{guild_id} — Modify guild settings."""
-        import base64
 
         payload: dict[str, Any] = {}
 
@@ -1179,7 +1166,6 @@ class HTTPClient:
         Returns:
             Updated user object
         """
-        import base64
 
         payload: dict[str, Any] = {}
 
@@ -1265,7 +1251,6 @@ class HTTPClient:
         Returns:
             Emoji object
         """
-        import base64
 
         # Convert bytes to base64 data URI
         image_data = base64.b64encode(image).decode("ascii")
@@ -1367,7 +1352,6 @@ class HTTPClient:
         Returns:
             Sticker object
         """
-        import base64
 
         # Convert bytes to base64 data URI
         image_data = base64.b64encode(image).decode("ascii")
@@ -1602,9 +1586,6 @@ class HTTPClient:
         Returns:
             URL-encoded emoji string or "name:id" for custom emojis
         """
-        import re
-        import emoji as emoji_lib
-        import urllib.parse
 
         # Handle PartialEmoji or Emoji objects
         if hasattr(emoji, "id") and emoji.id:

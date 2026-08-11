@@ -118,13 +118,21 @@ class Message:
 
         Returns:
             The created Message object.
+
+        Raises:
+            TypeError: You specified both file, and files, or both embed, and embeds
         """
         if self._http is None:
             raise RuntimeError("Message is not bound to an HTTP client")
 
+        if embed is not None and embeds is not None:
+            raise TypeError("Cannot mix embed and embeds keyword arguments.")
+
+        if file is not None and files is not None:
+            raise TypeError("Cannot mix file and files keyword arguments.")
+
         # Auto-convert single embed to embeds list
-        combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
-        combined_kwargs = process_embed_args(combined_kwargs)
+        embed_list = process_embed_args(embed, embeds)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -137,7 +145,8 @@ class Message:
             self.channel_id,
             content=content,
             files=file_list,
-            **combined_kwargs,
+            embeds=embed_list,
+            **kwargs,
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self._channel
@@ -152,7 +161,6 @@ class Message:
         embeds: list[Any] | None = None,
         file: File | None = None,
         files: list[File] | None = None,
-        **kwargs: Any,
     ) -> Message:
         """Reply to this message with a message reference.
 
@@ -162,17 +170,24 @@ class Message:
             embeds: Multiple embeds to include.
             file: A single File object to attach.
             files: Multiple File objects to attach.
-            **kwargs: Additional arguments to pass to send_message
 
         Returns:
             The created Message object.
+
+        Raises:
+            TypeError: You specified both file, and files, or both embed, and embeds
         """
         if self._http is None:
             raise RuntimeError("Message is not bound to an HTTP client")
 
+        if embed is not None and embeds is not None:
+            raise TypeError("Cannot mix embed and embeds keyword arguments.")
+
+        if file is not None and files is not None:
+            raise TypeError("Cannot mix file and files keyword arguments.")
+
         # Auto-convert single embed to embeds list
-        combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
-        combined_kwargs = process_embed_args(combined_kwargs)
+        embed_list = process_embed_args(embed, embeds)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -194,7 +209,7 @@ class Message:
             content=content,
             message_reference=message_reference,
             files=file_list,
-            **combined_kwargs,
+            embeds=embed_list,
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self._channel
@@ -228,13 +243,21 @@ class Message:
 
         Returns:
             The created Message object.
+
+        Raises:
+            TypeError: You specified both file, and files, or both embed, and embeds
         """
         if self._http is None:
             raise RuntimeError("Message is not bound to an HTTP client")
 
+        if embed is not None and embeds is not None:
+            raise TypeError("Cannot mix embed and embeds keyword arguments.")
+
+        if file is not None and files is not None:
+            raise TypeError("Cannot mix file and files keyword arguments.")
+
         # Auto-convert single embed to embeds list
-        combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
-        combined_kwargs = process_embed_args(combined_kwargs)
+        embed_list = process_embed_args(embed, embeds)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -244,7 +267,11 @@ class Message:
             file_list = [f.to_dict() for f in files]
 
         data = await self._http.send_message(
-            channel_id, content=content, files=file_list, **combined_kwargs
+            channel_id,
+            content=content,
+            files=file_list,
+            embeds=embed_list,
+            **kwargs,
         )
         msg = Message.from_data(data, self._http)
         msg._cache_guild(self._guild)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import pkgutil
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -241,7 +241,10 @@ def search_directory(path: str) -> Iterator[str]:
             yield prefix + name
 
 
-def process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
+def process_embed_args(
+    embed: dict[str, Any] | Embed | None,
+    embeds: Sequence[dict[str, Any] | Embed] | None,
+) -> list[dict[str, Any]] | None:
     """Process embed/embeds arguments to ensure proper format.
 
     Converts:
@@ -249,25 +252,21 @@ def process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
     - embeds=[Embed(...)] -> embeds=[{...}]
     - embeds=[{...}] -> embeds=[{...}] (no change)
     """
+    embeds_normalized: list[dict[str, Any]]
+    if embeds:
+        embeds_normalized = [e.to_dict() if isinstance(e, Embed) else e for e in embeds]
+        return embeds_normalized
 
-    # Handle singular 'embed' parameter
-    if "embed" in kwargs:
-        embed = kwargs.pop("embed")
-        if embed is not None:
-            # Convert Embed object to dict
-            if isinstance(embed, Embed):
-                kwargs["embeds"] = [embed.to_dict()]
-            else:
-                # Assume it's already a dict
-                kwargs["embeds"] = [embed]
+    if not embed:
+        return None
 
-    # Handle plural 'embeds' parameter - convert any Embed objects to dicts
-    if "embeds" in kwargs and kwargs["embeds"] is not None:
-        kwargs["embeds"] = [
-            e.to_dict() if isinstance(e, Embed) else e for e in kwargs["embeds"]
-        ]
+    if isinstance(embed, Embed):
+        embeds_normalized = [embed.to_dict()]
+    else:
+        # Assume it's already a dict
+        embeds_normalized = [embed]
 
-    return kwargs
+    return embeds_normalized
 
 
 def escape_mentions(text: str) -> str:
