@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from fluxer.utils import process_embed_args
 
+from .message import Message
 from ..enums import ChannelType
 from ..utils import snowflake_to_datetime
 
@@ -15,7 +16,6 @@ if TYPE_CHECKING:
     from ..voice import VoiceClient
     from .embed import Embed
     from .guild import Guild
-    from .message import Message
 
 
 @dataclass(slots=True)
@@ -103,6 +103,9 @@ class Channel:
         Returns:
             The created Message object.
 
+        Raises:
+            TypeError: You specified both file, and files, or both embed, and embeds
+
         Examples:
             # Send a file from path
             from fluxer import File
@@ -115,15 +118,17 @@ class Channel:
             embed = Embed(title="Title")
             await channel.send(embed=embed, file=File("data.json"))
         """
-        # Import here to avoid circular imports
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
+        if embed is not None and embeds is not None:
+            raise TypeError("Cannot mix embed and embeds keyword arguments.")
+
+        if file is not None and files is not None:
+            raise TypeError("Cannot mix file and files keyword arguments.")
+
         # Auto-convert single embed to embeds list
-        combined_kwargs = {"embed": embed, "embeds": embeds}
-        combined_kwargs = process_embed_args(combined_kwargs)
+        embed_list = process_embed_args(embed, embeds)
 
         # Handle file/files parameter - convert File objects to dict format
         file_list: list[dict[str, Any]] | None = None
@@ -137,7 +142,7 @@ class Channel:
             content=content,
             files=file_list,
             message_reference=message_reference,
-            **combined_kwargs,
+            embeds=embed_list,
         )
         msg = Message.from_data(data, self._http)
         msg._channel = self
@@ -153,8 +158,6 @@ class Channel:
         Returns:
             The fetched Message object.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -173,8 +176,6 @@ class Channel:
         Returns:
             A list of Message objects.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -191,8 +192,6 @@ class Channel:
         Returns:
             A list of pinned Message objects.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
