@@ -27,6 +27,7 @@ class Message:
     author: User
     timestamp: str
     edited_timestamp: str | None = None
+    flags: int = 0
 
     embeds: list[dict[str, Any]] = field(default_factory=list)
     attachments: list[Attachment] = field(default_factory=list)
@@ -57,6 +58,7 @@ class Message:
             author=author,
             timestamp=data["timestamp"],
             edited_timestamp=data.get("edited_timestamp"),
+            flags=int(data["flags"]),
             embeds=data.get("embeds", []),
             attachments=attachments,
             mentions=mentions,
@@ -267,6 +269,12 @@ class Message:
         if self._http is None:
             raise RuntimeError("Message is not bound to an HTTP client")
         await self._http.delete_message(self.channel_id, self.id)
+
+    async def suppress_embeds(self) -> None:
+        """Suppress all embeds in this message."""
+        if self._http is None:
+            raise RuntimeError("Message is not bound to an HTTP client")
+        await self._http.suppress_message_embeds(self.channel_id, self.id, self.flags)
 
     async def add_reaction(self, emoji: str | PartialEmoji) -> None:
         """Add a reaction to this message.
