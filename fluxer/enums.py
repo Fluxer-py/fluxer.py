@@ -4,7 +4,7 @@ import enum
 
 # =============================================================================
 # Gateway Opcodes
-# Fluxer mirrors Discord's opcode structure since it's wire-compatible.
+# Values come from the Fluxer Gateway Protocol Reference.
 # =============================================================================
 
 
@@ -16,12 +16,17 @@ class GatewayOpcode(enum.IntEnum):
     IDENTIFY = 2  # Client -> Server: Start a new session
     PRESENCE_UPDATE = 3  # Client -> Server: Update client presence/status
     VOICE_STATE_UPDATE = 4  # Client -> Server: Join/move/leave voice channels
+    VOICE_SERVER_PING = 5  # Client -> Server: Voice RTC signaling ping
     RESUME = 6  # Client -> Server: Resume a dropped connection
     RECONNECT = 7  # Server -> Client: Client should reconnect
     REQUEST_GUILD_MEMBERS = 8  # Client -> Server: Request guild member list
     INVALID_SESSION = 9  # Server -> Client: Session is invalid
     HELLO = 10  # Server -> Client: Sent on connect, contains heartbeat_interval
     HEARTBEAT_ACK = 11  # Server -> Client: Acknowledgement of heartbeat
+    GATEWAY_ERROR = 12  # Server -> Client: Structured gateway error
+    LAZY_REQUEST = 14  # Client -> Server: Guild subscription/lazy load state
+    REQUEST_GUILD_COUNTS = 15  # Client -> Server: Request guild statistics
+    REQUEST_CHANNEL_MEMBER_COUNTS = 16  # Client -> Server: Request channel metrics
 
 
 # =============================================================================
@@ -103,8 +108,7 @@ class GatewayCloseCode(enum.IntEnum):
     INVALID_SHARD = 4010
     SHARDING_REQUIRED = 4011
     INVALID_API_VERSION = 4012
-    INVALID_INTENTS = 4013
-    DISALLOWED_INTENTS = 4014
+    ACK_BACKPRESSURE = 4013
 
     @property
     def is_reconnectable(self) -> bool:
@@ -114,8 +118,7 @@ class GatewayCloseCode(enum.IntEnum):
             self.INVALID_SHARD,
             self.SHARDING_REQUIRED,
             self.INVALID_API_VERSION,
-            self.INVALID_INTENTS,
-            self.DISALLOWED_INTENTS,
+            self.ACK_BACKPRESSURE,
         }
         return self not in non_reconnectable
 

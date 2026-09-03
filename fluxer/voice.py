@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pyright: reportMissingImports=false
+
 import asyncio
 import logging
 import shlex
@@ -87,8 +89,9 @@ class VoiceClient:
         self, endpoint: str, token: str, session_id: str
     ) -> None:
         """Called by Client when VOICE_SERVER_UPDATE happens for this guild."""
-        self._room = rtc.Room()
-        await self._room.connect(endpoint, token)
+        room = rtc.Room()
+        self._room = room
+        await room.connect(endpoint, token)
 
         self._connected.set()
         log.info(
@@ -165,7 +168,7 @@ class VoiceClient:
         # 20ms Opus frames at 48kHz = 960 samples; s16le = 2 bytes/sample
         chunk_bytes = 960 * source.num_channels * 2
 
-        # Keeping this close to discord.py's implementation
+        # Keep ffmpeg process handling predictable for background playback.
         args = [source.executable]
         if source.before_options:
             args += shlex.split(source.before_options)

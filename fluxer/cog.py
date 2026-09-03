@@ -1,6 +1,6 @@
 """Cog system for organizing bot commands and event listeners.
 
-Similar to discord.py's cog system, this allows you to group related commands
+This allows you to group related commands
 and event handlers into separate classes for better code organization.
 """
 

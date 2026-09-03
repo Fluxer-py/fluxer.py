@@ -7,7 +7,7 @@ from typing import Any, BinaryIO
 class File:
     """Represents a file to be uploaded to Fluxer.
 
-    This class is similar to discord.py's File class and makes it easy to send files.
+    This class makes it easy to send files through Fluxer message routes.
 
     Args:
         fp: A file-like object, path string, or bytes to upload.

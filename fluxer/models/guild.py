@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from fluxer.models.emoji import Emoji
 from fluxer.models.member import GuildMember
 from fluxer.models.role import Role
+from fluxer.sticker import Sticker
 
 from ..utils import snowflake_to_datetime
 
@@ -24,6 +25,7 @@ class Guild:
     owner_id: int | None = None
     member_count: int | None = None
     unavailable: bool = False
+    roles: list[Role] = field(default_factory=list)
 
     _http: HTTPClient | None = field(default=None, repr=False)
 
@@ -217,6 +219,135 @@ class Guild:
             raise RuntimeError("Cannot unban user without HTTPClient")
 
         await self._http.unban_guild_member(self.id, user_id, reason=reason)
+
+    async def invites(self) -> list[Any]:
+        """Fetch invites for this guild."""
+        from ..invite import Invite
+
+        if not self._http:
+            raise RuntimeError("Cannot fetch invites without HTTPClient")
+        data = await self._http.get_guild_invites(self.id)
+        return [Invite.from_data(item, self._http) for item in data]
+
+    async def audit_logs(self, **kwargs: Any) -> Any:
+        """Fetch this guild's audit log."""
+        from ..audit_logs import AuditLog
+
+        if not self._http:
+            raise RuntimeError("Cannot fetch audit logs without HTTPClient")
+        data = await self._http.get_guild_audit_logs(self.id, **kwargs)
+        return AuditLog.from_data(data)
+
+    async def fetch_stickers(self) -> list[Sticker]:
+        """Fetch all stickers in this guild."""
+        if not self._http:
+            raise RuntimeError("Cannot fetch stickers without HTTPClient")
+        data = await self._http.get_guild_stickers(self.id)
+        return [Sticker.from_data(item, self._http) for item in data]
+
+    async def discovery_status(self) -> Any:
+        from ..fluxer_models import DiscoveryStatus
+
+        if not self._http:
+            raise RuntimeError("Cannot fetch discovery status without HTTPClient")
+        return DiscoveryStatus.from_data(
+            await self._http.get_guild_discovery_status(self.id), self._http
+        )
+
+    async def apply_for_discovery(self, **payload: Any) -> Any:
+        from ..fluxer_models import DiscoveryApplication
+
+        if not self._http:
+            raise RuntimeError("Cannot apply for discovery without HTTPClient")
+        method = getattr(self._http, "apply_for_guild_discovery", None)
+        if method is None:
+            method = self._http.apply_for_discovery
+        return DiscoveryApplication.from_data(
+            await method(self.id, **payload), self._http
+        )
+
+    async def edit_discovery_application(self, **payload: Any) -> Any:
+        from ..fluxer_models import DiscoveryApplication
+
+        if not self._http:
+            raise RuntimeError("Cannot edit discovery application without HTTPClient")
+        method = getattr(self._http, "edit_guild_discovery_application", None)
+        if method is None:
+            method = self._http.edit_discovery_application
+        return DiscoveryApplication.from_data(
+            await method(self.id, **payload),
+            self._http,
+        )
+
+    async def withdraw_discovery_application(self) -> None:
+        if not self._http:
+            raise RuntimeError(
+                "Cannot withdraw discovery application without HTTPClient"
+            )
+        await self._http.withdraw_discovery_application(self.id)
+
+    async def join_discovery(self) -> Any:
+        if not self._http:
+            raise RuntimeError("Cannot join discovery guild without HTTPClient")
+        return await self._http.join_discovery_guild(self.id)
+
+    async def get_vanity_url(self) -> Any:
+        from ..fluxer_models import VanityUrl
+
+        if not self._http:
+            raise RuntimeError("Cannot fetch vanity URL without HTTPClient")
+        return VanityUrl.from_data(
+            await self._http.get_guild_vanity_url(self.id), self._http
+        )
+
+    async def update_vanity_url(self, code: str) -> Any:
+        from ..fluxer_models import VanityUrl
+
+        if not self._http:
+            raise RuntimeError("Cannot update vanity URL without HTTPClient")
+        return VanityUrl.from_data(
+            await self._http.update_guild_vanity_url(self.id, code), self._http
+        )
+
+    async def transfer_ownership(self, new_owner_id: int | str, **payload: Any) -> Any:
+        from ..fluxer_models import GuildTransferResult
+
+        if not self._http:
+            raise RuntimeError("Cannot transfer ownership without HTTPClient")
+        return GuildTransferResult.from_data(
+            await self._http.transfer_guild_ownership(self.id, new_owner_id, **payload),
+            self._http,
+        )
+
+    async def bulk_create_emojis(self, emojis: list[dict[str, Any]]) -> Any:
+        from ..fluxer_models import BulkEmojiResult
+
+        if not self._http:
+            raise RuntimeError("Cannot create emojis without HTTPClient")
+        return BulkEmojiResult.from_data(
+            await self._http.bulk_create_guild_emojis(self.id, emojis), self._http
+        )
+
+    async def bulk_create_stickers(self, stickers: list[dict[str, Any]]) -> Any:
+        from ..fluxer_models import BulkStickerResult
+
+        if not self._http:
+            raise RuntimeError("Cannot create stickers without HTTPClient")
+        return BulkStickerResult.from_data(
+            await self._http.bulk_create_guild_stickers(self.id, stickers), self._http
+        )
+
+    async def clone_emoji(self, **payload: Any) -> Emoji:
+        if not self._http:
+            raise RuntimeError("Cannot clone emoji without HTTPClient")
+        data = await self._http.clone_guild_emoji(self.id, **payload)
+        return Emoji.from_data(data, self._http, guild_id=self.id)
+
+    async def clone_sticker(self, **payload: Any) -> Sticker:
+        if not self._http:
+            raise RuntimeError("Cannot clone sticker without HTTPClient")
+        data = await self._http.clone_guild_sticker(self.id, **payload)
+        return Sticker.from_data(data, self._http)
 
     def __str__(self) -> str:
         return self.name or f"Guild({self.id})"

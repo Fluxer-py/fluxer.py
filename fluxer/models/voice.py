@@ -16,6 +16,7 @@ class VoiceState:
     user_id: int
     guild_id: int | None = None
     channel_id: int | None = None
+    connection_id: str | None = None
     session_id: str | None = None
     mute: bool = False
     deaf: bool = False
@@ -35,6 +36,7 @@ class VoiceState:
             user_id=int(data["user_id"]),
             guild_id=int(data["guild_id"]) if data.get("guild_id") else None,
             channel_id=int(data["channel_id"]) if data.get("channel_id") else None,
+            connection_id=data.get("connection_id"),
             session_id=data.get("session_id"),
             mute=data.get("mute", False),
             deaf=data.get("deaf", False),

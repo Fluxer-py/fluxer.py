@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
+
 from fluxer.utils import process_embed_args
 
 from ..enums import ChannelType
@@ -15,7 +17,25 @@ if TYPE_CHECKING:
     from ..voice import VoiceClient
     from .embed import Embed
     from .guild import Guild
-    from .message import Message
+    from .message import Message, PartialMessage
+
+
+class _TypingContext:
+    def __init__(self, channel: Channel) -> None:
+        self.channel = channel
+
+    def __await__(self):
+        return self._send().__await__()
+
+    async def __aenter__(self) -> _TypingContext:
+        await self._send()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        return None
+
+    async def _send(self) -> None:
+        await self.channel.trigger_typing()
 
 
 @dataclass(slots=True)
@@ -89,6 +109,8 @@ class Channel:
         file: File | None = None,
         files: list[File] | None = None,
         message_reference: dict[str, Any] | None = None,
+        allowed_mentions: Any | None = None,
+        **kwargs: Any,
     ) -> Message:
         """Send a message to this channel.
 
@@ -99,6 +121,7 @@ class Channel:
             file: A single File object to attach.
             files: Multiple File objects to attach.
             message_reference: Reference to another message for replies.
+            allowed_mentions: Controls which mentions notify users.
 
         Returns:
             The created Message object.
@@ -122,7 +145,7 @@ class Channel:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         # Auto-convert single embed to embeds list
-        combined_kwargs = {"embed": embed, "embeds": embeds}
+        combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
         combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
@@ -137,6 +160,7 @@ class Channel:
             content=content,
             files=file_list,
             message_reference=message_reference,
+            allowed_mentions=allowed_mentions,
             **combined_kwargs,
         )
         msg = Message.from_data(data, self._http)
@@ -185,7 +209,79 @@ class Channel:
             msg._cache_guild(self._guild)
         return msgs
 
-    async def fetch_pinned_messages(self) -> list[Message]:
+    def get_partial_message(self, message_id: int | str) -> PartialMessage:
+        """Return a lightweight message handle for this channel."""
+        from .message import PartialMessage
+
+        return PartialMessage(
+            channel_id=self.id,
+            id=int(message_id),
+            _http=self._http,
+            _channel=self,
+            _guild=self._guild,
+        )
+
+    async def history(
+        self,
+        *,
+        limit: int = 50,
+        before: int | str | None = None,
+        after: int | str | None = None,
+        around: int | str | None = None,
+    ) -> AsyncIterator[Message]:
+        """Iterate over recent messages in this channel."""
+        from .message import Message
+
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+
+        data = await self._http.get_messages(
+            self.id,
+            limit=limit,
+            before=before,
+            after=after,
+            around=around,
+        )
+        for msg_data in data:
+            msg = Message.from_data(msg_data, self._http)
+            msg._channel = self
+            msg._cache_guild(self._guild)
+            yield msg
+
+    async def purge(
+        self,
+        *,
+        limit: int = 50,
+        check: Callable[[Message], bool] | None = None,
+        before: int | str | None = None,
+        after: int | str | None = None,
+        around: int | str | None = None,
+    ) -> list[Message]:
+        """Delete recent messages selected by an optional predicate."""
+        deleted: list[Message] = []
+        async for message in self.history(
+            limit=limit,
+            before=before,
+            after=after,
+            around=around,
+        ):
+            if check is None or check(message):
+                deleted.append(message)
+
+        if deleted:
+            if self._http is None:
+                raise RuntimeError("Channel is not bound to an HTTP client")
+            await self._http.delete_messages(
+                self.id, [message.id for message in deleted]
+            )
+        return deleted
+
+    async def fetch_pinned_messages(
+        self,
+        *,
+        limit: int | None = None,
+        before: int | str | None = None,
+    ) -> list[Message]:
         """Fetch all pinned messages from this channel.
 
         Returns:
@@ -196,12 +292,42 @@ class Channel:
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
-        data = await self._http.get_pinned_messages(self.id)
-        msgs = [Message.from_data(msg_data, self._http) for msg_data in data]
+        data = await self._http.get_pinned_messages(self.id, limit=limit, before=before)
+        msgs = [
+            Message.from_data(msg_data.get("message", msg_data), self._http)
+            for msg_data in data
+        ]
         for msg in msgs:
             msg._channel = self
             msg._guild = self._guild
         return msgs
+
+    async def ack_pins(self) -> None:
+        """Acknowledge this channel's current pin state."""
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+        if hasattr(self._http, "ack_pins"):
+            await self._http.ack_pins(self.id)
+        else:
+            await self._http.acknowledge_pins(self.id)
+
+    async def invites(self) -> list[Any]:
+        """Fetch invites for this channel."""
+        from ..invite import Invite
+
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+        data = await self._http.get_channel_invites(self.id)
+        return [Invite.from_data(item, self._http) for item in data]
+
+    async def create_invite(self, **kwargs: Any) -> Any:
+        """Create an invite for this channel."""
+        from ..invite import Invite
+
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+        data = await self._http.create_channel_invite(self.id, **kwargs)
+        return Invite.from_data(data, self._http)
 
     async def delete_messages(self, message_ids: list[int | str]) -> None:
         """Bulk delete messages in this channel.
@@ -222,6 +348,10 @@ class Channel:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         return await self._http.trigger_typing(self.id)
+
+    def typing(self) -> _TypingContext:
+        """Return a typing indicator helper for this channel."""
+        return _TypingContext(self)
 
     async def connect(
         self,

@@ -4,7 +4,7 @@ from .embed import Embed
 from .emoji import Emoji
 from .guild import Guild
 from .member import GuildMember
-from .message import Message
+from .message import DeletedReferencedMessage, Message, MessageReference, PartialMessage
 from .profile import UserProfile
 from .reaction import (
     PartialEmoji,
@@ -16,7 +16,7 @@ from .reaction import (
 from .role import Role
 from .user import User
 from .voice import VoiceState
-from .webhook import Webhook
+from .webhook import Webhook, WebhookMessage
 
 __all__ = [
     "Attachment",
@@ -26,6 +26,9 @@ __all__ = [
     "Guild",
     "GuildMember",
     "Message",
+    "MessageReference",
+    "DeletedReferencedMessage",
+    "PartialMessage",
     "PartialEmoji",
     "Reaction",
     "RawReactionActionEvent",
@@ -36,4 +39,5 @@ __all__ = [
     "User",
     "VoiceState",
     "Webhook",
+    "WebhookMessage",
 ]

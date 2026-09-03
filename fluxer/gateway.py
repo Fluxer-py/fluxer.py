@@ -84,6 +84,8 @@ class Gateway:
         self._session_id: str | None = None
         self._resume_gateway_url: str | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
+        self._voice_state_task: asyncio.Task[None] | None = None
+        self._voice_state_queue: asyncio.Queue[GatewayPayload] = asyncio.Queue()
         self._is_closed: bool = False
         self._last_heartbeat_ack: bool = True
 
@@ -161,11 +163,20 @@ class Gateway:
             await self._handle_close_code(self._ws.close_code)
 
     async def _handle_payload_task(self, payload: GatewayPayload) -> None:
-        """Simple wrapper function to ensure that gateway payload handling is done truly asynchronously"""
+        """Schedule gateway payload handling away from the receive loop."""
         task = asyncio.create_task(self._handle_payload(payload))
         self._tasks.append(task)
-        task.add_done_callback(lambda t: self._tasks.remove(t))
-        task.add_done_callback(lambda t: t.result())
+
+        def _finish(completed: asyncio.Task[None]) -> None:
+            try:
+                self._tasks.remove(completed)
+                completed.result()
+            except ValueError:
+                pass
+            except Exception:
+                log.exception("Gateway payload task failed")
+
+        task.add_done_callback(_finish)
 
     async def _handle_payload(self, payload: GatewayPayload) -> None:
         """Route an incoming payload by opcode."""
@@ -210,6 +221,9 @@ class Gateway:
                 await asyncio.sleep(1 + (5 * (not resumable)))
                 if self._ws:
                     await self._ws.close()
+
+            case GatewayOpcode.GATEWAY_ERROR:
+                log.error("Gateway error payload: %s", payload.d)
 
     async def _handle_dispatch(self, event_name: str, data: Any) -> None:
         """Handle a DISPATCH event (op 0)."""
@@ -346,6 +360,7 @@ class Gateway:
         """Gracefully close the gateway connection."""
         self._is_closed = True
         self._stop_heartbeat()
+        self._stop_voice_state_worker()
         if self._ws and not self._ws.closed:
             await self._ws.close(code=1000)
         if self._session and not self._session.closed:
@@ -355,24 +370,82 @@ class Gateway:
         self,
         *,
         status: str = "online",
+        activity: Any | None = None,
         activity_name: str | None = None,
         activity_type: int = 0,
+        afk: bool = False,
+        since: float | None = None,
     ) -> None:
         """Update the bot's presence/status."""
-        activity = None
-        if activity_name:
+        if activity is None and activity_name:
             activity = {"name": activity_name, "type": activity_type}
+        elif isinstance(activity, str):
+            activity = {"name": activity, "type": activity_type}
+        elif activity is not None and hasattr(activity, "to_dict"):
+            activity = activity.to_dict()
 
         payload = GatewayPayload(
             op=GatewayOpcode.PRESENCE_UPDATE,
             d={
-                "since": None,
+                "since": since,
                 "activities": [activity] if activity else [],
                 "status": status,
-                "afk": False,
+                "afk": afk,
             },
         )
         await self._send(payload)
+
+    async def request_guild_members(
+        self,
+        *,
+        guild_id: int | str,
+        query: str = "",
+        limit: int = 0,
+        presences: bool = False,
+        user_ids: list[int | str] | None = None,
+        nonce: str | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "guild_id": str(guild_id),
+            "query": query,
+            "limit": limit,
+            "presences": presences,
+        }
+        if user_ids is not None:
+            payload["user_ids"] = [str(user_id) for user_id in user_ids]
+        if nonce is not None:
+            payload["nonce"] = nonce
+        await self._send(
+            GatewayPayload(op=GatewayOpcode.REQUEST_GUILD_MEMBERS, d=payload)
+        )
+
+    async def request_lazy_members(
+        self,
+        *,
+        guild_id: int | str,
+        ranges: list[list[int]],
+        channels: dict[str, Any] | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {"guild_id": str(guild_id), "ranges": ranges}
+        if channels is not None:
+            payload["channels"] = channels
+        await self._send(GatewayPayload(op=GatewayOpcode.LAZY_REQUEST, d=payload))
+
+    async def request_guild_counts(self, guild_ids: list[int | str]) -> None:
+        await self._send(
+            GatewayPayload(
+                op=GatewayOpcode.REQUEST_GUILD_COUNTS,
+                d={"guild_ids": [str(guild_id) for guild_id in guild_ids]},
+            )
+        )
+
+    async def request_channel_member_counts(self, channel_ids: list[int | str]) -> None:
+        await self._send(
+            GatewayPayload(
+                op=GatewayOpcode.REQUEST_CHANNEL_MEMBER_COUNTS,
+                d={"channel_ids": [str(channel_id) for channel_id in channel_ids]},
+            )
+        )
 
     async def update_voice_state(
         self,
@@ -391,4 +464,26 @@ class Gateway:
                 "self_deaf": self_deaf,
             },
         )
-        await self._send(payload)
+        self._start_voice_state_worker()
+        await self._voice_state_queue.put(payload)
+
+    def _start_voice_state_worker(self) -> None:
+        if self._voice_state_task is None or self._voice_state_task.done():
+            self._voice_state_task = asyncio.create_task(self._voice_state_loop())
+
+    def _stop_voice_state_worker(self) -> None:
+        if self._voice_state_task:
+            self._voice_state_task.cancel()
+            self._voice_state_task = None
+
+    async def _voice_state_loop(self) -> None:
+        try:
+            while True:
+                payload = await self._voice_state_queue.get()
+                try:
+                    await self._send(payload)
+                    await asyncio.sleep(0.5)
+                finally:
+                    self._voice_state_queue.task_done()
+        except asyncio.CancelledError:
+            pass

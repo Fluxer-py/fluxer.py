@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from .models.embed import Embed
 
-# Fluxer uses the same epoch as Discord: 2015-01-01T00:00:00Z
+# Fluxer snowflakes use the 2015-01-01T00:00:00Z epoch.
 FLUXER_EPOCH = 1420070400000
 
 

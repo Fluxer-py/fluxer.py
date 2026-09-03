@@ -1,20 +1,26 @@
 """Pytest configuration and shared fixtures for Fluxer integration tests."""
 
 import os
+import sys
+from pathlib import Path
 from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
 
-from fluxer.http import HTTPClient
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+if str(PACKAGE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PACKAGE_ROOT))
+
+from fluxer.http import HTTPClient  # noqa: E402
 
 
 @pytest.fixture(scope="session")
 def bot_token() -> str:
-    """Get the bot token from environment variable or use hardcoded token."""
+    """Get the bot token from environment variable."""
     token = os.getenv("FLUXER_BOT_TOKEN")
     if not token:
-        token = "bot_token"
+        pytest.skip("FLUXER_BOT_TOKEN is required for live Fluxer API tests")
     return token
 
 

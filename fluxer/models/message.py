@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
+
 from fluxer.utils import process_embed_args
 
 from ..utils import snowflake_to_datetime
@@ -15,6 +16,123 @@ if TYPE_CHECKING:
     from .guild import Guild
     from .reaction import PartialEmoji, Reaction
     from .user import User
+
+
+@dataclass(slots=True)
+class MessageReference:
+    """Reference to another Fluxer message."""
+
+    message_id: int
+    channel_id: int | None = None
+    guild_id: int | None = None
+    type: int | None = None
+    attachment_ids: list[int] = field(default_factory=list)
+    embed_indices: list[int] = field(default_factory=list)
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> MessageReference:
+        return cls(
+            message_id=int(data["message_id"]),
+            channel_id=int(data["channel_id"]) if data.get("channel_id") else None,
+            guild_id=int(data["guild_id"]) if data.get("guild_id") else None,
+            type=data.get("type"),
+            attachment_ids=[int(item) for item in data.get("attachment_ids", [])],
+            embed_indices=[int(item) for item in data.get("embed_indices", [])],
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {"message_id": str(self.message_id)}
+        if self.channel_id is not None:
+            data["channel_id"] = str(self.channel_id)
+        if self.guild_id is not None:
+            data["guild_id"] = str(self.guild_id)
+        if self.type is not None:
+            data["type"] = self.type
+        if self.attachment_ids:
+            data["attachment_ids"] = [str(item) for item in self.attachment_ids]
+        if self.embed_indices:
+            data["embed_indices"] = self.embed_indices
+        return data
+
+
+@dataclass(slots=True)
+class DeletedReferencedMessage:
+    """Placeholder for a referenced message that is no longer available."""
+
+    id: int | None = None
+    channel_id: int | None = None
+    guild_id: int | None = None
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> DeletedReferencedMessage:
+        return cls(
+            id=int(data["id"]) if data.get("id") else None,
+            channel_id=int(data["channel_id"]) if data.get("channel_id") else None,
+            guild_id=int(data["guild_id"]) if data.get("guild_id") else None,
+        )
+
+
+@dataclass(slots=True)
+class PartialMessage:
+    """Lightweight handle for a Fluxer message."""
+
+    channel_id: int
+    id: int
+    _http: HTTPClient | None = field(default=None, repr=False)
+    _channel: Channel | None = field(default=None, repr=False)
+    _guild: Guild | None = field(default=None, repr=False)
+
+    @property
+    def jump_url(self) -> str:
+        guild_id = self._guild.id if self._guild is not None else "@me"
+        return f"https://fluxer.app/channels/{guild_id}/{self.channel_id}/{self.id}"
+
+    async def fetch(self) -> Message:
+        if self._http is None:
+            raise RuntimeError("PartialMessage is not bound to an HTTP client")
+        data = await self._http.get_message(self.channel_id, self.id)
+        message = Message.from_data(data, self._http)
+        message._channel = self._channel
+        message._cache_guild(self._guild)
+        return message
+
+    async def edit(self, content: str | None = None, **kwargs: Any) -> Message:
+        if self._http is None:
+            raise RuntimeError("PartialMessage is not bound to an HTTP client")
+        kwargs = process_embed_args(kwargs)
+        data = await self._http.edit_message(
+            self.channel_id,
+            self.id,
+            content=content,
+            **kwargs,
+        )
+        message = Message.from_data(data, self._http)
+        message._channel = self._channel
+        message._cache_guild(self._guild)
+        return message
+
+    async def delete(self) -> None:
+        if self._http is None:
+            raise RuntimeError("PartialMessage is not bound to an HTTP client")
+        await self._http.delete_message(self.channel_id, self.id)
+
+    async def pin(self) -> None:
+        if self._http is None:
+            raise RuntimeError("PartialMessage is not bound to an HTTP client")
+        await self._http.pin_message(self.channel_id, self.id)
+
+    async def unpin(self) -> None:
+        if self._http is None:
+            raise RuntimeError("PartialMessage is not bound to an HTTP client")
+        await self._http.unpin_message(self.channel_id, self.id)
+
+    async def ack(self) -> None:
+        if self._http is None:
+            raise RuntimeError("PartialMessage is not bound to an HTTP client")
+        if hasattr(self._http, "ack_message"):
+            await self._http.ack_message(self.channel_id, self.id)
+        else:
+            await self._http.acknowledge_message(self.channel_id, self.id)
 
 
 @dataclass(slots=True)
@@ -34,6 +152,7 @@ class Message:
     pinned: bool = False
     reactions: list[Reaction] = field(default_factory=list)
     referenced_message: Message | None = None
+    message_reference: MessageReference | None = None
 
     _http: HTTPClient | None = field(default=None, repr=False)
     _channel: Channel | None = field(default=None, repr=False)
@@ -67,6 +186,11 @@ class Message:
                 if (ref_data := data.get("referenced_message"))
                 else None
             ),
+            message_reference=(
+                MessageReference.from_data(ref_data)
+                if (ref_data := data.get("message_reference"))
+                else None
+            ),
         )
 
         # Parse reactions and link them to the message
@@ -93,8 +217,13 @@ class Message:
 
     @property
     def guild_id(self) -> int | None:
-        """Shortcut for self.guild.id, created for backwards compatiblity"""
+        """Shortcut for the cached guild ID."""
         return self._guild.id if self._guild else None
+
+    @property
+    def jump_url(self) -> str:
+        guild_id = self.guild_id if self.guild_id is not None else "@me"
+        return f"https://fluxer.app/channels/{guild_id}/{self.channel_id}/{self.id}"
 
     async def send(
         self,
@@ -254,6 +383,7 @@ class Message:
         """Edit this message."""
         if self._http is None:
             raise RuntimeError("Message is not bound to an HTTP client")
+        kwargs = process_embed_args(kwargs)
         data = await self._http.edit_message(
             self.channel_id, self.id, content=content, **kwargs
         )

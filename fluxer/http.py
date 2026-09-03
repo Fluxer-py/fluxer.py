@@ -15,6 +15,10 @@ log = logging.getLogger(__name__)
 DEFAULT_API_URL = "https://api.fluxer.app/v1"
 
 
+def _payload_value(value: Any) -> Any:
+    return value.to_dict() if hasattr(value, "to_dict") else value
+
+
 def _get_user_agent() -> str:
     """Get the user agent string with the current version."""
     from . import __version__
@@ -52,7 +56,7 @@ class Route:
 class RateLimiter:
     """Per-route rate limit handler using Fluxer's response headers.
 
-    Fluxer returns rate limit info via HTTP headers (same pattern as Discord):
+    Fluxer returns rate limit info via HTTP headers:
         X-RateLimit-Limit: max requests in window
         X-RateLimit-Remaining: requests left
         X-RateLimit-Reset: Unix timestamp when the limit resets
@@ -367,6 +371,23 @@ class HTTPClient:
             self._route("POST", "/channels/{channel_id}/typing", channel_id=channel_id)
         )
 
+    async def get_channel_invites(self, channel_id: int | str) -> list[dict[str, Any]]:
+        """GET /channels/{channel_id}/invites"""
+        return await self.request(
+            self._route("GET", "/channels/{channel_id}/invites", channel_id=channel_id)
+        )
+
+    async def create_channel_invite(
+        self, channel_id: int | str, **payload: Any
+    ) -> dict[str, Any]:
+        """POST /channels/{channel_id}/invites"""
+        return await self.request(
+            self._route(
+                "POST", "/channels/{channel_id}/invites", channel_id=channel_id
+            ),
+            json=payload,
+        )
+
     # -- Messages --
     async def send_message(
         self,
@@ -377,6 +398,12 @@ class HTTPClient:
         embeds: list[Any] | None = None,
         files: list[Any] | None = None,
         message_reference: dict[str, Any] | None = None,
+        allowed_mentions: Any | None = None,
+        flags: int | None = None,
+        nonce: str | int | None = None,
+        favorite_meme_id: int | str | None = None,
+        sticker_ids: list[int | str] | None = None,
+        tts: bool | None = None,
     ) -> dict[str, Any]:
         """POST /channels/{channel_id}/messages
 
@@ -388,6 +415,7 @@ class HTTPClient:
             files: List of file objects to attach
             message_reference: Reference to another message for replies
                 Example: {"message_id": "123456789", "channel_id": "987654321"}
+            allowed_mentions: Controls which mentions trigger notifications
         """
         route = self._route(
             "POST",
@@ -417,7 +445,19 @@ class HTTPClient:
             payload["embeds"] = normalized
 
         if message_reference is not None:
-            payload["message_reference"] = message_reference
+            payload["message_reference"] = _payload_value(message_reference)
+        if allowed_mentions is not None:
+            payload["allowed_mentions"] = _payload_value(allowed_mentions)
+        if flags is not None:
+            payload["flags"] = flags
+        if nonce is not None:
+            payload["nonce"] = nonce
+        if favorite_meme_id is not None:
+            payload["favorite_meme_id"] = str(favorite_meme_id)
+        if sticker_ids is not None:
+            payload["sticker_ids"] = [str(sticker_id) for sticker_id in sticker_ids]
+        if tts is not None:
+            payload["tts"] = tts
 
         # --- File handling ---
         if files:
@@ -465,6 +505,7 @@ class HTTPClient:
         limit: int = 50,
         before: int | str | None = None,
         after: int | str | None = None,
+        around: int | str | None = None,
     ) -> list[dict[str, Any]]:
         """GET /channels/{channel_id}/messages"""
         params: dict[str, Any] = {"limit": limit}
@@ -472,6 +513,8 @@ class HTTPClient:
             params["before"] = before
         if after:
             params["after"] = after
+        if around:
+            params["around"] = around
 
         route = self._route(
             "GET", "/channels/{channel_id}/messages", channel_id=channel_id
@@ -485,6 +528,10 @@ class HTTPClient:
         *,
         content: str | None = None,
         embeds: list[dict[str, Any]] | None = None,
+        allowed_mentions: Any | None = None,
+        flags: int | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+        message_snapshots: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """PATCH /channels/{channel_id}/messages/{message_id}"""
         route = self._route(
@@ -498,6 +545,14 @@ class HTTPClient:
             payload["content"] = content
         if embeds is not None:
             payload["embeds"] = embeds
+        if allowed_mentions is not None:
+            payload["allowed_mentions"] = _payload_value(allowed_mentions)
+        if flags is not None:
+            payload["flags"] = flags
+        if attachments is not None:
+            payload["attachments"] = attachments
+        if message_snapshots is not None:
+            payload["message_snapshots"] = message_snapshots
         return await self.request(route, json=payload)
 
     async def delete_message(
@@ -525,7 +580,13 @@ class HTTPClient:
         await self.request(route, json=payload)
 
     # -- Pinned Messages --
-    async def get_pinned_messages(self, channel_id: int | str) -> list[dict[str, Any]]:
+    async def get_pinned_messages(
+        self,
+        channel_id: int | str,
+        *,
+        limit: int | None = None,
+        before: int | str | None = None,
+    ) -> list[dict[str, Any]]:
         """GET /channels/{channel_id}/pins - Get all pinned messages in a channel.
 
         Args:
@@ -535,7 +596,12 @@ class HTTPClient:
             List of pinned message objects.
         """
         route = self._route("GET", "/channels/{channel_id}/pins", channel_id=channel_id)
-        return await self.request(route)
+        params: dict[str, Any] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if before is not None:
+            params["before"] = before
+        return await self.request(route, params=params or None)
 
     async def pin_message(self, channel_id: int | str, message_id: int | str) -> None:
         """PUT /channels/{channel_id}/pins/{message_id} - Pin a message.
@@ -573,6 +639,33 @@ class HTTPClient:
         )
         await self.request(route)
 
+    async def ack_message(self, channel_id: int | str, message_id: int | str) -> None:
+        """POST /channels/{channel_id}/messages/{message_id}/ack"""
+        route = self._route(
+            "POST",
+            "/channels/{channel_id}/messages/{message_id}/ack",
+            channel_id=channel_id,
+            message_id=message_id,
+        )
+        await self.request(route, json={})
+
+    async def ack_pins(self, channel_id: int | str) -> None:
+        """POST /channels/{channel_id}/pins/ack"""
+        route = self._route(
+            "POST", "/channels/{channel_id}/pins/ack", channel_id=channel_id
+        )
+        await self.request(route, json={})
+
+    async def acknowledge_message(
+        self, channel_id: int | str, message_id: int | str
+    ) -> None:
+        """Alias for acknowledging a Fluxer message."""
+        await self.ack_message(channel_id, message_id)
+
+    async def acknowledge_pins(self, channel_id: int | str) -> None:
+        """Alias for acknowledging a channel's pin state."""
+        await self.ack_pins(channel_id)
+
     # -- Guilds --
     async def get_guild(self, guild_id: int | str) -> dict[str, Any]:
         """GET /guilds/{guild_id}"""
@@ -584,6 +677,21 @@ class HTTPClient:
         """GET /guilds/{guild_id}/channels"""
         return await self.request(
             self._route("GET", "/guilds/{guild_id}/channels", guild_id=guild_id)
+        )
+
+    async def get_guild_invites(self, guild_id: int | str) -> list[dict[str, Any]]:
+        """GET /guilds/{guild_id}/invites"""
+        return await self.request(
+            self._route("GET", "/guilds/{guild_id}/invites", guild_id=guild_id)
+        )
+
+    async def get_guild_audit_logs(
+        self, guild_id: int | str, **params: Any
+    ) -> dict[str, Any]:
+        """GET /guilds/{guild_id}/audit-logs"""
+        return await self.request(
+            self._route("GET", "/guilds/{guild_id}/audit-logs", guild_id=guild_id),
+            params=params or None,
         )
 
     async def get_guild_member(
@@ -1420,6 +1528,117 @@ class HTTPClient:
             reason=reason,
         )
 
+    async def get_guild_discovery_status(self, guild_id: int | str) -> dict[str, Any]:
+        """GET /guilds/{guild_id}/discovery"""
+        return await self.request(
+            self._route("GET", "/guilds/{guild_id}/discovery", guild_id=guild_id)
+        )
+
+    async def apply_for_guild_discovery(
+        self, guild_id: int | str, **payload: Any
+    ) -> dict[str, Any]:
+        """POST /guilds/{guild_id}/discovery"""
+        return await self.request(
+            self._route("POST", "/guilds/{guild_id}/discovery", guild_id=guild_id),
+            json=payload,
+        )
+
+    async def edit_guild_discovery_application(
+        self, guild_id: int | str, **payload: Any
+    ) -> dict[str, Any]:
+        """PATCH /guilds/{guild_id}/discovery"""
+        return await self.request(
+            self._route("PATCH", "/guilds/{guild_id}/discovery", guild_id=guild_id),
+            json=payload,
+        )
+
+    async def apply_for_discovery(
+        self, guild_id: int | str, **payload: Any
+    ) -> dict[str, Any]:
+        """Alias for applying a guild to Fluxer discovery."""
+        return await self.apply_for_guild_discovery(guild_id, **payload)
+
+    async def edit_discovery_application(
+        self, guild_id: int | str, **payload: Any
+    ) -> dict[str, Any]:
+        """Alias for editing a guild discovery application."""
+        return await self.edit_guild_discovery_application(guild_id, **payload)
+
+    async def withdraw_discovery_application(self, guild_id: int | str) -> None:
+        """DELETE /guilds/{guild_id}/discovery"""
+        await self.request(
+            self._route("DELETE", "/guilds/{guild_id}/discovery", guild_id=guild_id)
+        )
+
+    async def join_discovery_guild(self, guild_id: int | str) -> Any:
+        """POST /discovery/guilds/{guild_id}/join"""
+        return await self.request(
+            self._route("POST", "/discovery/guilds/{guild_id}/join", guild_id=guild_id)
+        )
+
+    async def get_guild_vanity_url(self, guild_id: int | str) -> dict[str, Any]:
+        """GET /guilds/{guild_id}/vanity-url"""
+        return await self.request(
+            self._route("GET", "/guilds/{guild_id}/vanity-url", guild_id=guild_id)
+        )
+
+    async def update_guild_vanity_url(
+        self, guild_id: int | str, code: str
+    ) -> dict[str, Any]:
+        """PATCH /guilds/{guild_id}/vanity-url"""
+        return await self.request(
+            self._route("PATCH", "/guilds/{guild_id}/vanity-url", guild_id=guild_id),
+            json={"code": code},
+        )
+
+    async def transfer_guild_ownership(
+        self, guild_id: int | str, new_owner_id: int | str, **payload: Any
+    ) -> dict[str, Any]:
+        """POST /guilds/{guild_id}/transfer-ownership"""
+        payload["owner_id"] = str(new_owner_id)
+        return await self.request(
+            self._route(
+                "POST", "/guilds/{guild_id}/transfer-ownership", guild_id=guild_id
+            ),
+            json=payload,
+        )
+
+    async def bulk_create_guild_emojis(
+        self, guild_id: int | str, emojis: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """POST /guilds/{guild_id}/emojis/bulk"""
+        return await self.request(
+            self._route("POST", "/guilds/{guild_id}/emojis/bulk", guild_id=guild_id),
+            json={"emojis": emojis},
+        )
+
+    async def bulk_create_guild_stickers(
+        self, guild_id: int | str, stickers: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """POST /guilds/{guild_id}/stickers/bulk"""
+        return await self.request(
+            self._route("POST", "/guilds/{guild_id}/stickers/bulk", guild_id=guild_id),
+            json={"stickers": stickers},
+        )
+
+    async def clone_guild_emoji(
+        self, guild_id: int | str, **payload: Any
+    ) -> dict[str, Any]:
+        """POST /guilds/{guild_id}/emojis/clone"""
+        return await self.request(
+            self._route("POST", "/guilds/{guild_id}/emojis/clone", guild_id=guild_id),
+            json=payload,
+        )
+
+    async def clone_guild_sticker(
+        self, guild_id: int | str, **payload: Any
+    ) -> dict[str, Any]:
+        """POST /guilds/{guild_id}/stickers/clone"""
+        return await self.request(
+            self._route("POST", "/guilds/{guild_id}/stickers/clone", guild_id=guild_id),
+            json=payload,
+        )
+
     # ~~ Webhooks ~
     async def get_guild_webhooks(self, guild_id: int | str) -> list[dict[str, Any]]:
         """GET /guilds/{guild_id}/webhooks"""
@@ -1551,6 +1770,13 @@ class HTTPClient:
         avatar_url: str | None = None,
         wait: bool = False,
         files: list[dict[str, Any]] | None = None,
+        allowed_mentions: Any | None = None,
+        message_reference: Any | None = None,
+        flags: int | None = None,
+        nonce: str | int | None = None,
+        favorite_meme_id: int | str | None = None,
+        sticker_ids: list[int | str] | None = None,
+        tts: bool | None = None,
     ) -> dict[str, Any] | None:
         """POST /webhooks/{webhook_id}/{token}"""
         route = self._route(
@@ -1568,6 +1794,20 @@ class HTTPClient:
             payload["username"] = username
         if avatar_url is not None:
             payload["avatar_url"] = avatar_url
+        if allowed_mentions is not None:
+            payload["allowed_mentions"] = _payload_value(allowed_mentions)
+        if message_reference is not None:
+            payload["message_reference"] = _payload_value(message_reference)
+        if flags is not None:
+            payload["flags"] = flags
+        if nonce is not None:
+            payload["nonce"] = nonce
+        if favorite_meme_id is not None:
+            payload["favorite_meme_id"] = str(favorite_meme_id)
+        if sticker_ids is not None:
+            payload["sticker_ids"] = [str(sticker_id) for sticker_id in sticker_ids]
+        if tts is not None:
+            payload["tts"] = tts
         params = {"wait": "true"} if wait else None
         if files:
             form = aiohttp.FormData()
@@ -1590,6 +1830,95 @@ class HTTPClient:
             route,
             json=payload,
             params=params,
+        )
+
+    async def edit_webhook_message(
+        self,
+        webhook_id: int | str,
+        token: str,
+        message_id: int | str,
+        *,
+        content: str | None = None,
+        embeds: list[dict[str, Any]] | None = None,
+        allowed_mentions: Any | None = None,
+        flags: int | None = None,
+    ) -> dict[str, Any]:
+        """PATCH /webhooks/{webhook_id}/{token}/messages/{message_id}"""
+        route = self._route(
+            "PATCH",
+            "/webhooks/{webhook_id}/{token}/messages/{message_id}",
+            webhook_id=webhook_id,
+            token=token,
+            message_id=message_id,
+        )
+        payload: dict[str, Any] = {}
+        if content is not None:
+            payload["content"] = content
+        if embeds is not None:
+            payload["embeds"] = embeds
+        if allowed_mentions is not None:
+            payload["allowed_mentions"] = _payload_value(allowed_mentions)
+        if flags is not None:
+            payload["flags"] = flags
+        return await self.request(route, json=payload)
+
+    async def delete_webhook_message(
+        self,
+        webhook_id: int | str,
+        token: str,
+        message_id: int | str,
+    ) -> None:
+        """DELETE /webhooks/{webhook_id}/{token}/messages/{message_id}"""
+        await self.request(
+            self._route(
+                "DELETE",
+                "/webhooks/{webhook_id}/{token}/messages/{message_id}",
+                webhook_id=webhook_id,
+                token=token,
+                message_id=message_id,
+            )
+        )
+
+    async def execute_github_webhook(
+        self, webhook_id: int | str, token: str, payload: dict[str, Any]
+    ) -> Any:
+        """POST /webhooks/{webhook_id}/{token}/github"""
+        return await self.request(
+            self._route(
+                "POST",
+                "/webhooks/{webhook_id}/{token}/github",
+                webhook_id=webhook_id,
+                token=token,
+            ),
+            json=payload,
+        )
+
+    async def execute_instatus_webhook(
+        self, webhook_id: int | str, token: str, payload: dict[str, Any]
+    ) -> Any:
+        """POST /webhooks/{webhook_id}/{token}/instatus"""
+        return await self.request(
+            self._route(
+                "POST",
+                "/webhooks/{webhook_id}/{token}/instatus",
+                webhook_id=webhook_id,
+                token=token,
+            ),
+            json=payload,
+        )
+
+    async def execute_slack_webhook(
+        self, webhook_id: int | str, token: str, payload: dict[str, Any]
+    ) -> Any:
+        """POST /webhooks/{webhook_id}/{token}/slack"""
+        return await self.request(
+            self._route(
+                "POST",
+                "/webhooks/{webhook_id}/{token}/slack",
+                webhook_id=webhook_id,
+                token=token,
+            ),
+            json=payload,
         )
 
     # -- Reactions --

@@ -13,6 +13,16 @@
 
 ---
 
+# Fluxer.py Rework
+
+The purpose of this branch (labeled as **_Fluxer.py Rework_**) is to expand the functionality of `fluxer.py` while making its API and usage more familiar to other Python libraries.
+
+This branch is a **Work In Progress**, and breaking changes should be expected as development continues.
+
+Although this branch is **not intended for production use**, it can be used to begin **porting bots to Fluxer**. It provides broader coverage of the Fluxer API, along with more and better utilities designed to make the bot-porting process easier and more straightforward.
+
+---
+
 A Python API wrapper for [Fluxer](https://fluxer.app).
 
 Build bots and automated clients with a clean, type-safe, and
@@ -24,16 +34,26 @@ event-driven architecture.
 
 - Async-first design built on `asyncio`
 - REST API support with automatic rate limiting
-- WebSocket gateway for real-time events
-- Command framework with decorators
-- Modular cog system
-- Strongly-typed data models
-- Structured error handling and retry logic
-- Clean separation between low-level `Client` and high-level `Bot`
+- Prefix command framework in `fluxer.ext.commands`
+- Modular cogs, checks, converters, cooldowns, groups, and help commands
+- Message helpers for embeds, files, replies, references, allowed mentions, reactions, pins, and history
+- Webhook helpers for sending, editing, deleting, and waited message responses
+- Optional voice playback and voice-state cache helpers
+- Strongly-typed data models and Fluxer-native exceptions
 
 ---
 
 ## Installation
+
+>[!IMPORTANT]
+> To install Fluxer.py Rework use:
+> - `pip install "git+https://github.com/Fluxer-py/fluxer.py.git@rework"`.
+> 
+> Or the following command for Voice Support:
+> - `pip install "fluxer.py[voice] @ git+https://github.com/Fluxer-py/fluxer.py.git@rework"`
+
+>[!WARNING]
+> The following `pip install` instructions won't install the Rework version of Fluxer.py
 
 ```sh
 pip install fluxer.py
@@ -86,6 +106,9 @@ pip install -e .
 
 ## Template
 
+>[!NOTE]
+> The following template is not adapted to Fluxer.py Rework
+
 A [batteries-included template](https://github.com/PerpetualPossum/fluxer-py-template) is available to get you started quickly with a new bot project.
 
 ------------------------------------------------------------------------
@@ -95,16 +118,19 @@ A [batteries-included template](https://github.com/PerpetualPossum/fluxer-py-tem
 A simple bot with a ping command:
 
 ```py
-import fluxer
+import os
 
-bot = fluxer.Bot(command_prefix="!", intents=fluxer.Intents.default())
+import fluxer
+from fluxer.ext import commands
+
+bot = commands.Bot(command_prefix="!", intents=fluxer.Intents.default())
 
 @bot.event
 async def on_ready():
-    print(f"Bot is ready! Logged in as {bot.user.username}")
+    print(f"Bot is ready! Logged in as {bot.user}")
 
 @bot.command()
-async def ping(ctx):
+async def ping(ctx: commands.Context):
     await ctx.reply("Pong!")
 
 if __name__ == "__main__":
@@ -118,29 +144,31 @@ if __name__ == "__main__":
 
 ### Bot
 
-Use `Bot` if you need: - Decorator-based commands - Built-in command
-parsing - Cog support - Rapid bot development
+Use `fluxer.ext.commands.Bot` if you need decorator-based commands,
+built-in command parsing, groups, converters, checks, cogs, cooldowns,
+or a help command.
 
 ### Client
 
-Use `Client` if you need: - Full event-driven control - A custom command
-framework - Lower-level API interaction - Advanced or specialized
-implementations
+Use `fluxer.Client` if you need full event-driven control, custom command
+handling, direct REST helpers, cache access, gateway waiters, or advanced
+application behavior.
 
 ---
 
 ## Architecture Overview
 
-`Bot` extends `Client`, adding a command framework on top of the core
-event system.
+`fluxer.ext.commands.Bot` extends `Client`, adding a command framework on
+top of the core event system.
 
 Core components:
 
 - `HTTPClient` -- Handles REST requests and rate limits
-- `Gateway` -- Manages WebSocket connection and event dispatch
-- `Client` -- Base event-driven interface
-- `Bot` -- High-level command framework
-- `Cog` -- Modular command grouping system
+- `Gateway` -- Manages WebSocket connection, heartbeat, resume, and documented gateway sends
+- `Client` -- Base event interface, cache owner, waiters, and REST/model helper surface
+- `fluxer.ext.commands` -- Commands, groups, cogs, checks, converters, cooldowns, and help commands
+- `fluxer.ext.tasks` -- Reusable background task loops
+- `VoiceClient` -- Optional voice connection and playback support
 
 ---
 
@@ -155,15 +183,29 @@ Core components:
 -   `GuildMember`
 -   `VoiceState`
 -   `Webhook`
+-   `WebhookMessage`
 -   `Embed`
 -   `Emoji`
+-   `Reaction`
+-   `Role`
+-   `MessageReference`
+-   `PartialMessage`
+-   `AllowedMentions`
+-   `Object`
+-   `Colour` / `Color`
 
 Models encapsulate both state and behavior, exposing convenience methods
 such as:
 
 - `Message.reply()`
+- `Message.edit()`
+- `Message.add_reaction()`
 - `Channel.send()`
-- `Guild.kick_member()`
+- `Channel.history()`
+- `Channel.get_partial_message()`
+- `Guild.fetch_member()`
+- `Guild.ban()`
+- `Webhook.send()`
 
 ---
 
@@ -172,9 +214,14 @@ such as:
 Requires `fluxer.py[voice]` and ffmpeg
 
 ``` py
+import fluxer
+from fluxer.ext import commands
+
+bot = commands.Bot(command_prefix="!", intents=fluxer.Intents.default())
+
 @bot.command()
-async def play(ctx, channel_id: int, *, path: str):
-    channel = await bot.fetch_channel(str(channel_id))
+async def play(ctx: commands.Context, channel_id: int, *, path: str):
+    channel = await bot.fetch_channel(channel_id)
 
     async with await channel.connect(bot) as vc:
         await vc.play_file(path)
@@ -196,7 +243,7 @@ vc.resume()
 print(vc.is_paused)  # bool
 ```
 
-`FFmpegPCMAudio` accepts the same options as discord.py's `FFmpegPCMAudio`:
+`FFmpegPCMAudio` accepts common ffmpeg source options:
 
 | Parameter | Description |
 |---|---|
@@ -206,12 +253,15 @@ print(vc.is_paused)  # bool
 | `sample_rate` | Output sample rate in Hz (default: `48000`) |
 | `num_channels` | `1` for mono, `2` for stereo (default: `2`) |
 
+Voice state data is cached from gateway events and can be read with
+`Client.get_channel_voice_states()` and
+`Client.get_channel_voice_user_count()`.
+
 ------------------------------------------------------------------------
 
 ## Intents
 
-`Intents` determine which events your application receives from the
-WebSocket gateway.
+`Intents` determine which gateway events your application subscribes to.
 
 Common usage:
 
@@ -220,8 +270,9 @@ fluxer.Intents.default()
 fluxer.Intents.all()
 ```
 
-Limiting intents improves performance and ensures your application
-subscribes only to necessary events.
+Pass intents to `fluxer.Client` or `fluxer.ext.commands.Bot`. Limiting
+intents improves performance and keeps your application subscribed only to
+the events it needs.
 
 ---
 
@@ -235,14 +286,13 @@ FluxerException
 
 Errors include:
 
-- HTTP errors mapped to REST status codes
-- Gateway protocol errors
-- Connection and retry-related failures
+- `HTTPException`, `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, and `RateLimited`
+- `GatewayException` and `GatewayNotConnected`
+- `LoginFailure` and connection-related failures
 
 ---
 
 ## Documentation
 
-Full documentation is available at:
-
-https://deepwiki.com/akarealemil/fluxer.py/1-overview
+>[!NOTE]
+> *Full documentation is in progress*

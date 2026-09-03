@@ -1,4 +1,4 @@
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 __title__ = "fluxer.py"
 __author__ = "Emil"
 __license__ = "MIT"
@@ -11,7 +11,11 @@ from .file import File
 from .http import HTTPClient
 
 # Checks
+from .activity import Activity, BaseActivity, CustomActivity, Game, Spotify, Streaming
 from .checks import has_role, has_permission
+from .colour import Color, Colour
+from .mentions import AllowedMentions
+from .object import Object
 
 # Errors
 from .errors import (
@@ -35,12 +39,16 @@ from .models import (
     Guild,
     GuildMember,
     Message,
+    MessageReference,
+    DeletedReferencedMessage,
+    PartialMessage,
     Reaction,
     Role,
     User,
     UserProfile,
     VoiceState,
     Webhook,
+    WebhookMessage,
 )
 
 # Voice support is optional so only import if available
@@ -54,8 +62,18 @@ from .utils import datetime_to_snowflake, snowflake_to_datetime
 
 __all__ = [
     # Checks
+    "Activity",
+    "BaseActivity",
+    "CustomActivity",
+    "Game",
+    "Spotify",
+    "Streaming",
     "has_role",
     "has_permission",
+    "AllowedMentions",
+    "Color",
+    "Colour",
+    "Object",
     # Client
     "Bot",
     "Client",
@@ -88,12 +106,16 @@ __all__ = [
     "Guild",
     "GuildMember",
     "Message",
+    "MessageReference",
+    "DeletedReferencedMessage",
+    "PartialMessage",
     "Reaction",
     "Role",
     "User",
     "UserProfile",
     "VoiceState",
     "Webhook",
+    "WebhookMessage",
     # Utils
     "datetime_to_snowflake",
     "snowflake_to_datetime",

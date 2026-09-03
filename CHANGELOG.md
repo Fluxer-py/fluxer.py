@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0] - 2026-03-30
+
+### Added, Changed & Fixed
+
+Initial rework
+- Added, changed and fixed a LOT of things.
+
 ## [0.4.2] - 2026-03-30
 
 ### Added
