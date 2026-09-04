@@ -53,4 +53,6 @@ dev = [
     "pytest-cov>=7.0.0",
     "pyright>=1.1.408",
     "ruff>=0.15.0",
+    "zensical>=0.0.59",
+    "mkdocstrings-python>=2.0.8",
 ]
