@@ -123,7 +123,7 @@ import os
 import fluxer
 from fluxer.ext import commands
 
-bot = commands.Bot(command_prefix="!", intents=fluxer.Intents.default())
+bot = commands.Bot(command_prefix="!")
 
 @bot.event
 async def on_ready():
@@ -217,7 +217,7 @@ Requires `fluxer.py[voice]` and ffmpeg
 import fluxer
 from fluxer.ext import commands
 
-bot = commands.Bot(command_prefix="!", intents=fluxer.Intents.default())
+bot = commands.Bot(command_prefix="!")
 
 @bot.command()
 async def play(ctx: commands.Context, channel_id: int, *, path: str):
@@ -259,22 +259,55 @@ Voice state data is cached from gateway events and can be read with
 
 ------------------------------------------------------------------------
 
-## Intents
+## Connections and presence
 
-`Intents` determine which gateway events your application subscribes to.
+The client discovers REST, Gateway, media, and link services from the instance's
+`/.well-known/fluxer` document. The default origin is `https://fluxer.app`.
+Pass `instance_url="https://chat.example.org"` to connect to another instance.
+An explicit `api_url` is an already-versioned REST override; by itself it does
+not discover ancillary services or guess asset URLs.
 
-Common usage:
+`Intents` is retained for compatibility. Fluxer does not use it to filter events,
+and explicitly passing a mask emits `DeprecationWarning`. Omit it in new code.
+Use a string or `CustomActivity` for custom status; rich activities such as
+`Game`, `Streaming`, and `Spotify` cannot be published.
 
-```py
-fluxer.Intents.default()
-fluxer.Intents.all()
+```python
+await bot.change_presence(activity="Answering questions")
+await bot.change_presence(status="idle")  # Preserve the custom status.
+await bot.change_presence(activity=None)  # Clear the custom status.
 ```
 
-Pass intents to `fluxer.Client` or `fluxer.ext.commands.Bot`. Limiting
-intents improves performance and keeps your application subscribed only to
-the events it needs.
+Edits distinguish omission from clearing: `await message.edit(embed=embed)`
+preserves text, while `await message.edit(content=None)` clears it. Channel
+history and pinned-message helpers return one page, not an unlimited traversal.
+History accepts 1?100 messages; pin cursors are ISO8601 pin timestamps.
 
----
+The transport retains stable error codes, localized messages, and validation
+details. It distinguishes JSON, empty responses, and Slack's text response.
+Retries of mutations cannot guarantee exactly-once delivery. A global denial of
+an existing user session marks it invalid and stops retries with that credential.
+
+```python
+import asyncio
+import os
+from fluxer.http import HTTPClient
+from fluxer.errors import HTTPException
+
+async def main():
+    async with HTTPClient(os.environ["FLUXER_TOKEN"], max_retries=2) as http:
+        try:
+            user = await http.get_current_user()
+            print(user["username"])
+        except HTTPException as error:
+            print(error.status, error.code, error.message)
+
+asyncio.run(main())
+```
+
+Voice requires `pip install fluxer.py[voice]`, plus FFmpeg for PCM file playback.
+Voice clients retain the server-issued connection ID for cleanup; encrypted
+grants unsupported by this integration fail explicitly.
 
 ## Exceptions
 

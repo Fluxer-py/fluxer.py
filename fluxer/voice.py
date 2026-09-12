@@ -1,3 +1,8 @@
+"""Optional LiveKit voice connections and FFmpeg PCM playback.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 # pyright: reportMissingImports=false
@@ -21,7 +26,19 @@ except ImportError:
 
 
 class FFmpegPCMAudio:
-    """An audio source that reads from a file via ffmpeg."""
+    """An audio source that reads from a file via ffmpeg.
+
+    Note:
+        Requires the `voice` extra: `pip install fluxer.py[voice]`.
+
+    Attributes:
+        path: Filesystem path or operation path accepted by this method.
+        executable: FFmpeg executable name or path.
+        before_options: FFmpeg options placed before the input argument.
+        options: FFmpeg options appended after the input argument.
+        sample_rate: PCM sample rate expected by the audio source.
+        num_channels: Number of PCM channels used for playback.
+    """
 
     def __init__(
         self,
@@ -33,21 +50,58 @@ class FFmpegPCMAudio:
         sample_rate: int = 48000,
         num_channels: int = 2,
     ) -> None:
-        self.path = path
-        self.executable = executable
-        self.before_options = before_options
-        self.options = options
-        self.sample_rate = sample_rate
-        self.num_channels = num_channels
+        """Initialize the ffmpeg pcmaudio with the supplied configuration.
+
+        Args:
+            path: Filesystem path or operation path accepted by this method.
+            executable: FFmpeg executable name or path.
+            before_options: FFmpeg options placed before the input argument.
+            options: FFmpeg options appended after the input argument.
+            sample_rate: PCM sample rate expected by the audio source.
+            num_channels: Number of PCM channels used for playback.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
+        self.path: str = path
+        self.executable: str = executable
+        self.before_options: str | None = before_options
+        self.options: str | None = options
+        self.sample_rate: int = sample_rate
+        self.num_channels: int = num_channels
 
 
 class VoiceClient:
-    """Manages a voice connection to a channel via LiveKit."""
+    """Manages a voice connection to a channel via LiveKit.
+
+    Note:
+        Requires the `voice` extra: `pip install fluxer.py[voice]`.
+
+    Attributes:
+        is_connected: Return whether the underlying connection is currently established.
+        is_playing: Return whether this voice client has a published audio track.
+        is_paused: Return whether playback is paused while an audio track is published.
+        channel_id: Channel id.
+        guild_id: Guild id.
+    """
 
     def __init__(self, guild_id: int, channel_id: int, gateway: Gateway) -> None:
+        """Initialize the voice client with the supplied configuration.
+
+        Args:
+            guild_id: Identity of the guild used by this operation.
+            channel_id: Identity of the channel used by this operation.
+            gateway: Gateway used by this operation.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         self._guild_id = guild_id
         self._channel_id = channel_id
         self._gateway = gateway
+        self._connection_id: str | None = None
+        self._failure: Exception | None = None
+        self._placement = asyncio.Event()
         self._room: rtc.Room | None = None
         self._connected = asyncio.Event()
         self._current_track: rtc.LocalAudioTrack | None = None
@@ -58,47 +112,125 @@ class VoiceClient:
 
     @property
     def is_connected(self) -> bool:
+        """Return whether the underlying connection is currently established.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         return self._room is not None and self._connected.is_set()
 
     @property
     def is_playing(self) -> bool:
+        """Return whether this voice client has a published audio track.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         return self._current_publication is not None
 
     @property
     def is_paused(self) -> bool:
+        """Return whether playback is paused while an audio track is published.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         return self._current_publication is not None and not self._resume_event.is_set()
 
     @property
     def channel_id(self) -> int:
+        """Channel id.
+
+        Returns:
+            The result of this operation.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         return self._channel_id
 
     @property
     def guild_id(self) -> int:
+        """Guild id.
+
+        Returns:
+            The result of this operation.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         return self._guild_id
 
     def pause(self) -> None:
+        """Pause reads feeding the current voice playback.
+
+        Returns:
+            None.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         self._resume_event.clear()
 
     def resume(self) -> None:
+        """Resume reads feeding the current voice playback.
+
+        Returns:
+            None.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         self._resume_event.set()
 
     async def _wait_until_connected(self, timeout: float = 30.0) -> None:
-        await asyncio.wait_for(self._connected.wait(), timeout=timeout)
+        await asyncio.wait_for(self._placement.wait(), timeout=timeout)
+        if self._failure is not None:
+            raise self._failure
 
     async def _on_voice_server_update(
-        self, endpoint: str, token: str, session_id: str
+        self,
+        endpoint: str,
+        token: str,
+        connection_id: str,
     ) -> None:
-        """Called by Client when VOICE_SERVER_UPDATE happens for this guild."""
+        """Connect with the issued grant and remember its connection identity."""
+        self._connection_id = connection_id
+        self._connected.clear()
+        if self._room is not None:
+            await self.stop()
+            await self._room.disconnect()
         room = rtc.Room()
         self._room = room
-        await room.connect(endpoint, token)
 
-        self._connected.set()
-        log.info(
-            "voice connected: guild_id=%s channel_id=%s",
-            self._guild_id,
-            self._channel_id,
-        )
+        def disconnected(*args: Any) -> None:
+            if self._room is room:
+                self._connected.clear()
+
+        room.on("disconnected", disconnected)
+        try:
+            await room.connect(endpoint, token)
+        except Exception as exc:
+            self._failure = exc
+            await room.disconnect()
+            self._room = None
+        else:
+            self._connected.set()
+        finally:
+            self._placement.set()
+
+    def _reject_placement(self, message: str) -> None:
+        self._failure = RuntimeError(message)
+        self._placement.set()
 
     async def _publish_track(self, source: rtc.AudioSource) -> None:
         if self._room is None:
@@ -118,6 +250,18 @@ class VoiceClient:
         *,
         after: Callable[[Exception | None], Any] | None = None,
     ) -> None:
+        """Publish an audio source through the active LiveKit connection.
+
+        Args:
+            source: Audio source published through the active LiveKit connection.
+            after: Completion callback receiving the playback error, or None on success.
+
+        Returns:
+            None.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         await self.stop()
         if isinstance(source, FFmpegPCMAudio):
             self._playback_task = asyncio.get_running_loop().create_task(
@@ -225,6 +369,14 @@ class VoiceClient:
             await proc.wait()
 
     async def stop(self) -> None:
+        """Stop.
+
+        Returns:
+            None.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         if self._playback_task is not None and not self._playback_task.done():
             self._playback_task.cancel()
             try:
@@ -247,7 +399,18 @@ class VoiceClient:
         *,
         after: Callable[[Exception | None], Any] | None = None,
     ) -> None:
-        """Convenience wrapper around play(FFmpegPCMAudio(...)) that blocks until done. Added for testing and simple playback"""
+        """Convenience wrapper around play(FFmpegPCMAudio(...)) that blocks until done. Added for testing and simple playback.
+
+        Args:
+            path: Filesystem path or operation path accepted by this method.
+            after: Completion callback receiving the playback error, or None on success.
+
+        Returns:
+            None.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         await self.play(
             FFmpegPCMAudio(path),
             after=after,
@@ -256,18 +419,55 @@ class VoiceClient:
             await self._playback_task
 
     async def disconnect(self) -> None:
-        await self.stop()
-        await self._gateway.update_voice_state(
-            guild_id=str(self._guild_id), channel_id=None
-        )
+        """Leave the issued voice connection and release LiveKit resources.
 
-        if self._room:
-            await self._room.disconnect()
-            self._room = None
-        self._connected.clear()
+        Requires the optional voice extra. Repeated calls are safe.
+
+        Returns:
+            None.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
+        await self.stop()
+        try:
+            if self._connection_id is not None and self._gateway.is_connected:
+                await self._gateway.update_voice_state(
+                    guild_id=str(self._guild_id),
+                    channel_id=None,
+                    connection_id=self._connection_id,
+                )
+        finally:
+            if self._room is not None:
+                await self._room.disconnect()
+                self._room = None
+            self._connected.clear()
+            self._connection_id = None
 
     async def __aenter__(self) -> VoiceClient:
+        """Enter the asynchronous context and return this object.
+
+        Returns:
+            This instance, allowing chained calls.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         return self
 
     async def __aexit__(self, *_: object) -> None:
+        """Release resources when leaving the asynchronous context.
+
+        Args:
+            *_:  used by this operation.
+
+        Returns:
+            None.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
+        """
         await self.disconnect()
+
+
+__all__ = ("FFmpegPCMAudio", "VoiceClient")

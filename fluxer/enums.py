@@ -1,3 +1,8 @@
+"""Documented Fluxer protocol values and retained compatibility aliases.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 import enum
@@ -9,21 +14,30 @@ import enum
 
 
 class GatewayOpcode(enum.IntEnum):
-    """Gateway opcodes define the type of payload being sent/received."""
+    """Gateway opcodes define the type of payload being sent/received.
+
+    Attributes:
+        name: Symbolic name of this enumeration member.
+        value: Numeric wire or compatibility value of this member.
+    """
 
     DISPATCH = 0  # Server -> Client: An event was dispatched
     HEARTBEAT = 1  # Bidirectional: Maintain connection / request heartbeat
     IDENTIFY = 2  # Client -> Server: Start a new session
     PRESENCE_UPDATE = 3  # Client -> Server: Update client presence/status
     VOICE_STATE_UPDATE = 4  # Client -> Server: Join/move/leave voice channels
-    VOICE_SERVER_PING = 5  # Client -> Server: Voice RTC signaling ping
+    RESERVED_5 = 5
+    VOICE_SERVER_PING = RESERVED_5  # Deprecated compatibility alias; never send.
     RESUME = 6  # Client -> Server: Resume a dropped connection
     RECONNECT = 7  # Server -> Client: Client should reconnect
     REQUEST_GUILD_MEMBERS = 8  # Client -> Server: Request guild member list
     INVALID_SESSION = 9  # Server -> Client: Session is invalid
     HELLO = 10  # Server -> Client: Sent on connect, contains heartbeat_interval
     HEARTBEAT_ACK = 11  # Server -> Client: Acknowledgement of heartbeat
-    GATEWAY_ERROR = 12  # Server -> Client: Structured gateway error
+    RESERVED_12 = 12
+    GATEWAY_ERROR = (
+        RESERVED_12  # Deprecated compatibility alias; not a protocol error frame.
+    )
     LAZY_REQUEST = 14  # Client -> Server: Guild subscription/lazy load state
     REQUEST_GUILD_COUNTS = 15  # Client -> Server: Request guild statistics
     REQUEST_CHANNEL_MEMBER_COUNTS = 16  # Client -> Server: Request channel metrics
@@ -31,17 +45,26 @@ class GatewayOpcode(enum.IntEnum):
 
 # =============================================================================
 # Gateway Intents
-# Bit flags that tell the gateway which events you want to receive.
+# Deprecated compatibility masks; Fluxer has no intents field.
 # =============================================================================
 
 
 class Intents(enum.IntFlag):
-    """Gateway intents control which events your bot receives.
+    """Deprecated compatibility masks retained for existing imports.
+
+    Fluxer does not accept an intents field and these values do not control
+    event delivery. Explicit masks supplied to Client emit DeprecationWarning.
 
     Usage:
         intents = Intents.GUILDS | Intents.GUILD_MESSAGES
         intents = Intents.default()
         intents = Intents.all()
+
+
+
+    Attributes:
+        name: Symbolic name of this enumeration member.
+        value: Numeric wire or compatibility value of this member.
     """
 
     GUILDS = 1 << 0
@@ -63,7 +86,11 @@ class Intents(enum.IntFlag):
 
     @classmethod
     def default(cls) -> Intents:
-        """Returns a sensible default set of intents (excludes privileged ones)."""
+        """Return the legacy default compatibility mask.
+
+        Returns:
+            The result of this operation.
+        """
         value = cls(0)
         for intent in cls:
             if intent not in (
@@ -76,7 +103,11 @@ class Intents(enum.IntFlag):
 
     @classmethod
     def all(cls) -> Intents:
-        """Returns all intents enabled."""
+        """Returns all intents enabled.
+
+        Returns:
+            The result of this operation.
+        """
         value = cls(0)
         for intent in cls:
             value |= intent
@@ -84,7 +115,11 @@ class Intents(enum.IntFlag):
 
     @classmethod
     def none(cls) -> Intents:
-        """Returns no intents."""
+        """Returns no intents.
+
+        Returns:
+            The result of this operation.
+        """
         return cls(0)
 
 
@@ -94,7 +129,11 @@ class Intents(enum.IntFlag):
 
 
 class GatewayCloseCode(enum.IntEnum):
-    """WebSocket close codes the Fluxer gateway may send."""
+    """WebSocket close codes the Fluxer gateway may send.
+
+    Attributes:
+        is_reconnectable: Whether the bot should attempt to reconnect after this close code.
+    """
 
     UNKNOWN_ERROR = 4000
     UNKNOWN_OPCODE = 4001
@@ -108,17 +147,20 @@ class GatewayCloseCode(enum.IntEnum):
     INVALID_SHARD = 4010
     SHARDING_REQUIRED = 4011
     INVALID_API_VERSION = 4012
-    ACK_BACKPRESSURE = 4013
+    ACK_BACKPRESSURE = 4013  # Legacy name; this is not a documented Fluxer close code.
 
     @property
     def is_reconnectable(self) -> bool:
-        """Whether the bot should attempt to reconnect after this close code."""
+        """Whether the bot should attempt to reconnect after this close code.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+        """
         non_reconnectable = {
             self.AUTHENTICATION_FAILED,
             self.INVALID_SHARD,
             self.SHARDING_REQUIRED,
             self.INVALID_API_VERSION,
-            self.ACK_BACKPRESSURE,
         }
         return self not in non_reconnectable
 
@@ -129,12 +171,21 @@ class GatewayCloseCode(enum.IntEnum):
 
 
 class ChannelType(enum.IntEnum):
+    """Channel Type data and behaviour.
+
+    Attributes:
+        name: Symbolic name of this enumeration member.
+        value: Numeric wire or compatibility value of this member.
+    """
+
     GUILD_TEXT = 0
     DM = 1
     GUILD_VOICE = 2
     GROUP_DM = 3
     GUILD_CATEGORY = 4
-    GUILD_ANNOUNCEMENT = 5
+    GUILD_ANNOUNCEMENT = 5  # Legacy compatibility value, unsupported by Fluxer.
+    GUILD_LINK = 998
+    NOTES = 999
 
 
 # =============================================================================
@@ -150,10 +201,17 @@ class Permissions(enum.IntFlag):
 
         Permissions.SEND_MESSAGES | Permissions.READ_MESSAGE_HISTORY
         bool(role_permissions & Permissions.ADMINISTRATOR)
+
+
+
+    Attributes:
+        name: Symbolic name of this enumeration member.
+        value: Numeric wire or compatibility value of this member.
     """
 
     # -- General --
-    CREATE_INVITE = 1 << 0
+    CREATE_INSTANT_INVITE = 1 << 0
+    CREATE_INVITE = CREATE_INSTANT_INVITE
     KICK_MEMBERS = 1 << 1
     BAN_MEMBERS = 1 << 2
     ADMINISTRATOR = 1 << 3
@@ -172,12 +230,13 @@ class Permissions(enum.IntFlag):
     READ_MESSAGE_HISTORY = 1 << 16
     MENTION_EVERYONE = 1 << 17
     USE_EXTERNAL_EMOJIS = 1 << 18
-    USE_EXTERNAL_STICKERS = 1 << 33
+    USE_EXTERNAL_STICKERS = 1 << 37
     MODERATE_MEMBERS = 1 << 40
     CREATE_EXPRESSIONS = 1 << 43
     PIN_MESSAGES = 1 << 51
     BYPASS_SLOWMODE = 1 << 52
     UPDATE_RTC_REGION = 1 << 53
+    VIEW_CHANNEL_MEMBERS = 1 << 54
 
     # -- Voice --
     CONNECT = 1 << 20
@@ -185,7 +244,8 @@ class Permissions(enum.IntFlag):
     MUTE_MEMBERS = 1 << 22
     DEAFEN_MEMBERS = 1 << 23
     MOVE_MEMBERS = 1 << 24
-    USE_VOICE_ACTIVITY_DETECTION = 1 << 25
+    USE_VAD = 1 << 25
+    USE_VOICE_ACTIVITY_DETECTION = USE_VAD
 
     # -- Member management --
     CHANGE_NICKNAME = 1 << 26
@@ -193,3 +253,6 @@ class Permissions(enum.IntFlag):
     MANAGE_ROLES = 1 << 28
     MANAGE_WEBHOOKS = 1 << 29
     MANAGE_EXPRESSIONS = 1 << 30
+
+
+__all__ = ("GatewayOpcode", "Intents", "GatewayCloseCode", "ChannelType", "Permissions")

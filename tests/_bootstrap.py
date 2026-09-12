@@ -14,7 +14,6 @@ for path in (str(PACKAGE_ROOT), str(WORKSPACE_ROOT)):
 
 def load_dev_token() -> str:
     env_paths = (
-        WORKSPACE_ROOT / "full_example" / ".env",
         WORKSPACE_ROOT / "test_implementation" / ".env",
     )
     for env_path in env_paths:

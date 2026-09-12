@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
+from fluxer.http import HTTPClient
+
 import pytest
 
 import fluxer
@@ -10,10 +12,14 @@ import fluxer.channel
 import fluxer.message
 import fluxer.webhook
 from fluxer.gateway import Gateway, GatewayPayload
+from fluxer._endpoints import Endpoints
+from fluxer._types import UNSET
 
 
 class FakeHTTP:
     def __init__(self) -> None:
+        self._endpoints = Endpoints(None, "https://api.example.test/v1")
+        self._endpoints._values = {"webapp": "https://chat.example.test"}
         self.sent: list[tuple[int | str, dict[str, Any]]] = []
         self.edited: list[tuple[int | str, int | str, dict[str, Any]]] = []
         self.deleted: list[tuple[int | str, int | str]] = []
@@ -133,7 +139,7 @@ async def test_message_edit_accepts_single_embed() -> None:
     await message.edit(embed=fluxer.Embed(title="Menu page"))
 
     assert http.edited == [
-        (10, 100, {"content": None, "embeds": [{"title": "Menu page"}]})
+        (10, 100, {"content": UNSET, "embeds": [{"title": "Menu page"}]})
     ]
 
 
@@ -163,7 +169,7 @@ async def test_webhook_message_helpers() -> None:
 async def test_gateway_helper_payloads() -> None:
     sent: list[GatewayPayload] = []
     gateway = Gateway(
-        http_client=None,
+        http_client=HTTPClient("test", api_url="https://instance.test/v1"),
         token="token",
         intents=fluxer.Intents.default(),
         dispatch=cast(Any, lambda event, data: None),
@@ -174,11 +180,13 @@ async def test_gateway_helper_payloads() -> None:
 
     gateway._send = fake_send
 
-    await gateway.update_presence(activity=fluxer.Game("tests"), afk=True, since=1.0)
+    await gateway.update_presence(activity=fluxer.CustomActivity("tests"), afk=True)
     await gateway.request_guild_members(guild_id=20, query="a", limit=1, nonce="n")
-    await gateway.request_lazy_members(guild_id=20, ranges=[[0, 99]])
+    await gateway.request_lazy_members(
+        guild_id=20, ranges=[[0, 99]], channels={"10": [[0, 99]]}
+    )
     await gateway.request_guild_counts([20])
-    await gateway.request_channel_member_counts([10])
+    await gateway.request_channel_member_counts([10], guild_id=20)
     await gateway.update_voice_state(guild_id="20", channel_id="10")
     await asyncio.wait_for(gateway._voice_state_queue.join(), timeout=1.0)
     await gateway.close()

@@ -1,3 +1,8 @@
+"""Snowflake, formatting, embed, and module-discovery utilities.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 import os
@@ -14,12 +19,13 @@ FLUXER_EPOCH = 1420070400000
 
 
 def snowflake_to_datetime(snowflake: str | int) -> datetime:
-    """Convert a Fluxer Snowflake ID to a datetime.
+    """Convert a Fluxer snowflake to its UTC creation time.
 
-    Snowflakes encode a timestamp in the upper 42 bits.
+    The timestamp uses 41 bits above the 22 worker/process/sequence bits and
+    is measured from the Fluxer epoch of 2015-01-01.
 
     Args:
-        snowflake: The Snowflake ID as a string or int.
+        snowflake: Decimal snowflake whose timestamp should be decoded.
 
     Returns:
         A timezone-aware UTC datetime.
@@ -29,16 +35,13 @@ def snowflake_to_datetime(snowflake: str | int) -> datetime:
 
 
 def datetime_to_snowflake(dt: datetime) -> int:
-    """Convert a datetime to a Snowflake ID (useful for pagination).
-
-    This creates a Snowflake with only the timestamp component set.
-    Useful for before/after pagination parameters.
+    """Build the lowest snowflake for a timestamp, suitable for pagination.
 
     Args:
-        dt: A datetime object.
+        dt: Timestamp to encode; naive datetimes follow the local timezone.
 
     Returns:
-        A Snowflake integer.
+        A snowflake with all worker, process, and sequence bits cleared.
     """
     timestamp_ms = int(dt.timestamp() * 1000)
     snowflake = (timestamp_ms - FLUXER_EPOCH) << 22
@@ -46,15 +49,10 @@ def datetime_to_snowflake(dt: datetime) -> int:
 
 
 def utcnow() -> datetime:
-    """A helper function to return an aware UTC datetime representing the current time.
+    """Return the current timezone-aware UTC timestamp.
 
-    This should be preferred to :meth:`datetime.datetime.utcnow` since it is an aware
-    datetime, compared to the naive datetime in the standard library.
-
-    Returns
-    -------
-    :class:`datetime.datetime`
-        The current aware datetime in UTC.
+    Returns:
+        The current time with UTC timezone information.
     """
     return datetime.now(timezone.utc)
 
@@ -76,28 +74,21 @@ _MARKDOWN_STOCK_REGEX = rf"(?P<markdown>[_\\~|\*`]|{_MARKDOWN_ESCAPE_COMMON})"
 
 
 def remove_markdown(text: str, *, ignore_links: bool = True) -> str:
-    """A helper function that removes markdown characters.
+    """Remove recognised Markdown punctuation from text.
 
-    .. note::
-            This function is not markdown aware and may remove meaning from the original text. For example,
-            if the input contains ``10 * 5`` then it will be converted into ``10  5``.
+    Args:
+        text: Text whose Markdown punctuation should be removed.
+        ignore_links: Preserve punctuation inside recognised links when true.
 
-    Parameters
-    ----------
-    text: :class:`str`
-        The text to remove markdown from.
-    ignore_links: :class:`bool`
-        Whether to leave links alone when removing markdown. For example,
-        if a URL in the text contains characters such as ``_`` then it will
-        be left alone. Defaults to ``True``.
+    Returns:
+        Text with matching punctuation removed.
 
-    Returns
-    -------
-    :class:`str`
-        The text with the markdown special characters removed.
+    Note:
+        This is a pattern-based transformation, not a Markdown parser. It can
+        also remove punctuation that was intended as ordinary text.
     """
 
-    def replacement(match: re.Match) -> str:
+    def replacement(match: re.Match[str]) -> str:
         groupdict = match.groupdict()
         return groupdict.get("url", "")
 
@@ -110,32 +101,19 @@ def remove_markdown(text: str, *, ignore_links: bool = True) -> str:
 def escape_markdown(
     text: str, *, as_needed: bool = False, ignore_links: bool = True
 ) -> str:
-    r"""A helper function that escapes Fluxer's markdown.
+    """Escape recognised Markdown punctuation for literal display.
 
-    Parameters
-    ----------
-    text: :class:`str`
-        The text to escape markdown from.
-    as_needed: :class:`bool`
-        Whether to escape the markdown characters as needed. This
-        means that it does not escape extraneous characters if it's
-        not necessary, e.g. ``**hello**`` is escaped into ``\*\*hello**``
-        instead of ``\*\*hello\*\*``. Note however that this can open
-        you up to some clever syntax abuse. Defaults to ``False``.
-    ignore_links: :class:`bool`
-        Whether to leave links alone when escaping markdown. For example,
-        if a URL in the text contains characters such as ``_`` then it will
-        be left alone. This option is not supported with ``as_needed``.
-        Defaults to ``True``.
+    Args:
+        text: Text to protect from Markdown formatting.
+        as_needed: Escape paired formatting delimiters only where required.
+        ignore_links: Preserve recognised links when escaping all punctuation.
 
-    Returns
-    -------
-    :class:`str`
-        The text with the markdown special characters escaped with a slash.
+    Returns:
+        Text containing backslash escapes for matching punctuation.
     """
     if not as_needed:
 
-        def replacement(match: re.Match) -> str:
+        def replacement(match: re.Match[str]) -> str:
             groupdict = match.groupdict()
             is_url = groupdict.get("url")
             if is_url:
@@ -155,47 +133,19 @@ TimestampStyle = Literal["t", "T", "d", "D", "f", "F", "s", "S", "R"]
 
 
 def format_dt(dt: datetime | float, /, style: TimestampStyle = "f") -> str:
-    """Format a :class:`datetime.datetime`, :class:`int` or :class:`float` (seconds) for presentation within Fluxer.
+    """Format a timestamp using Fluxer's client-rendered timestamp notation.
 
-    This allows for a locale-independent way of presenting data using Fluxer specific Markdown.
+    Args:
+        dt: Datetime or Unix timestamp in seconds. Naive datetimes use local time.
+        style: Display style: t/T for time, d/D for date, f/F for date and time,
+            s/S for numeric date and time, or R for relative time.
 
-    +-------------+-------------------------------+------------------------+
-    |    Style    |        Example Output         |      Description       |
-    +=============+===============================+========================+
-    | t           | 22:57                         | Short Time             |
-    +-------------+-------------------------------+------------------------+
-    | T           | 22:57:58                      | Long Time              |
-    +-------------+-------------------------------+------------------------+
-    | d           | 17/05/2016                    | Short Date             |
-    +-------------+-------------------------------+------------------------+
-    | D           | 17 May 2016                   | Long Date              |
-    +-------------+-------------------------------+------------------------+
-    | f (default) | 17 May 2016 at 22:57          | Long Date, Short Time  |
-    +-------------+-------------------------------+------------------------+
-    | F           | Tuesday, 17 May 2016 at 22:57 | Full Date, Short Time  |
-    +-------------+-------------------------------+------------------------+
-    | s           | 17/05/2016, 22:57             | Short Date, Short Time |
-    +-------------+-------------------------------+------------------------+
-    | S           | 17/05/2016, 22:57:58          | Short Date, Long Time  |
-    +-------------+-------------------------------+------------------------+
-    | R           | 5 years ago                   | Relative Time          |
-    +-------------+-------------------------------+------------------------+
+    Returns:
+        Timestamp markup rendered in each recipient's locale.
 
-    Note that the exact output depends on the user's locale setting in the client. The example output
-    presented is using the ``en-GB`` locale.
-
-    Parameters
-    ----------
-    dt: :class:`datetime.datetime` | :class:`int` | :class:`float`
-        The datetime to format.
-        If this is a naive datetime, it is assumed to be local time.
-    style: :class:`str`
-        The style to format the datetime with. Defaults to ``f``
-
-    Returns
-    -------
-    :class:`str`
-        The formatted string.
+    Example:
+        from fluxer.utils import format_dt, utcnow
+        print(format_dt(utcnow(), style="R"))
     """
     if isinstance(dt, datetime):
         dt = dt.timestamp()
@@ -203,17 +153,16 @@ def format_dt(dt: datetime | float, /, style: TimestampStyle = "f") -> str:
 
 
 def search_directory(path: str) -> Iterator[str]:
-    """Walk through a directory and yield all modules.
+    """Yield importable module names below a directory in the working tree.
 
-    Parameters
-    ----------
-    path: :class:`str`
-        The path to search for modules
+    Args:
+        path: Directory below the current working directory to inspect.
 
-    Yields
-    ------
-    :class:`str`
-        The name of the found module. (usable in load_extension)
+    Yields:
+        Dotted module names suitable for the existing extension loader.
+
+    Raises:
+        ValueError: The path is outside the working directory, missing, or not a directory.
     """
     relpath = os.path.relpath(path)  # relative and normalized
     if ".." in relpath:
@@ -242,21 +191,26 @@ def search_directory(path: str) -> Iterator[str]:
 
 
 def process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Process embed/embeds arguments to ensure proper format.
+    """Normalize singular and plural embed arguments for message requests.
 
-    Converts:
-    - embed=Embed(...) -> embeds=[{...}]
-    - embeds=[Embed(...)] -> embeds=[{...}]
-    - embeds=[{...}] -> embeds=[{...}] (no change)
+    Args:
+        kwargs: Message options modified in place; a supplied singular embed
+            takes precedence over the plural embeds option.
+
+    Returns:
+        The same options mapping with rich-embed request dictionaries.
+
+    Note:
+        Parsed Embed objects retain response metadata, but this conversion
+        omits fields that the server does not accept in rich-embed input.
     """
-
     # Handle singular 'embed' parameter
     if "embed" in kwargs:
         embed = kwargs.pop("embed")
         if embed is not None:
             # Convert Embed object to dict
             if isinstance(embed, Embed):
-                kwargs["embeds"] = [embed.to_dict()]
+                kwargs["embeds"] = [embed._to_request_dict()]
             else:
                 # Assume it's already a dict
                 kwargs["embeds"] = [embed]
@@ -264,17 +218,38 @@ def process_embed_args(kwargs: dict[str, Any]) -> dict[str, Any]:
     # Handle plural 'embeds' parameter - convert any Embed objects to dicts
     if "embeds" in kwargs and kwargs["embeds"] is not None:
         kwargs["embeds"] = [
-            e.to_dict() if isinstance(e, Embed) else e for e in kwargs["embeds"]
+            e._to_request_dict() if isinstance(e, Embed) else e
+            for e in kwargs["embeds"]
         ]
 
     return kwargs
 
 
 def escape_mentions(text: str) -> str:
-    """A helper function that escapes everyone, here, role, and user mentions.
+    """Prevent supported user, role, everyone, and here mentions from notifying.
 
-    .. note::
+    Args:
+        text: Text containing mention syntax to neutralize.
 
-        This does not include channel mentions.
+    Returns:
+        Text with a zero-width character inserted in matching mentions.
+
+    Note:
+        Channel mentions are preserved.
     """
     return re.sub(r"@(everyone|here|[!&]?[0-9]{17,20})", "@\u200b\\1", text)
+
+
+__all__ = (
+    "snowflake_to_datetime",
+    "datetime_to_snowflake",
+    "utcnow",
+    "remove_markdown",
+    "escape_markdown",
+    "format_dt",
+    "search_directory",
+    "process_embed_args",
+    "escape_mentions",
+    "FLUXER_EPOCH",
+    "TimestampStyle",
+)

@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from fluxer import Channel, Client, Guild, SearchIndexing, SearchResult
+from fluxer.errors import BadRequest
 from fluxer.fluxer_models import parse_search_response
 from fluxer.http import HTTPClient
 
@@ -119,7 +120,7 @@ def test_search_messages_builds_complete_payload() -> None:
 
 def test_search_messages_omits_unspecified_values() -> None:
     async def run() -> None:
-        http: Any = HTTPClient("token")
+        http: Any = HTTPClient("token", is_bot=False)
         payload: dict[str, Any] = {}
 
         async def request(route, **kwargs):
@@ -127,8 +128,8 @@ def test_search_messages_omits_unspecified_values() -> None:
             return {}
 
         http.request = request
-        await http.search_messages(pinned=False)
-        assert payload == {"pinned": False}
+        await http.search_messages(scope="all", pinned=False)
+        assert payload == {"scope": "all", "pinned": False}
 
     asyncio.run(run())
 
@@ -157,6 +158,74 @@ def test_search_messages_requested_global_search_shape() -> None:
             "sort_order": "desc",
             "scope": "all",
         }
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("scope", [None, "current"])
+def test_search_messages_rejects_current_scope_without_context(scope) -> None:
+    async def run() -> None:
+        http: Any = HTTPClient("token", is_bot=False)
+        called = False
+
+        async def request(route, **kwargs):
+            nonlocal called
+            called = True
+            return {}
+
+        http.request = request
+        with pytest.raises(
+            ValueError,
+            match="scope='current' requires context_channel_id or context_guild_id",
+        ):
+            await http.search_messages(scope=scope, content="hello")
+        assert called is False
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("scope", ["open_dms", "all_guilds", "all"])
+def test_search_messages_rejects_non_current_bot_scope(scope) -> None:
+    async def run() -> None:
+        http: Any = HTTPClient("token", is_bot=True)
+        called = False
+
+        async def request(route, **kwargs):
+            nonlocal called
+            called = True
+            return {}
+
+        http.request = request
+        with pytest.raises(ValueError, match="only support scope='current'"):
+            await http.search_messages(scope=scope, content="hello")
+        assert called is False
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("context", "expected"),
+    [
+        ({"context_channel_id": 10}, {"context_channel_id": "10"}),
+        ({"context_guild_id": 20}, {"context_guild_id": "20"}),
+        (
+            {"context_channel_id": 10, "context_guild_id": 20},
+            {"context_channel_id": "10", "context_guild_id": "20"},
+        ),
+    ],
+)
+def test_search_messages_accepts_current_scope_contexts(context, expected) -> None:
+    async def run() -> None:
+        http: Any = HTTPClient("token")
+        payload: dict[str, Any] = {}
+
+        async def request(route, **kwargs):
+            payload.update(kwargs["json"])
+            return {}
+
+        http.request = request
+        await http.search_messages(scope="current", **context)
+        assert payload == {"scope": "current", **expected}
 
     asyncio.run(run())
 
@@ -235,3 +304,28 @@ def test_bot_search_helpers_inject_current_context() -> None:
             await client.search_messages(content="missing context")
 
     asyncio.run(run())
+
+
+def test_http_exception_renders_structured_validation_errors() -> None:
+    errors = [
+        {
+            "path": "context",
+            "code": "CONTEXT_CHANNEL_OR_GUILD_ID_REQUIRED",
+            "message": "A channel or guild context is required.",
+        },
+        {"path": "content", "message": "This value is invalid."},
+    ]
+    exception = BadRequest(
+        status=400,
+        code="INVALID_FORM_BODY",
+        message="Invalid form body.",
+        errors=errors,
+    )
+
+    assert exception.errors is errors
+    assert str(exception) == (
+        "400 INVALID_FORM_BODY: Invalid form body. "
+        "[context: CONTEXT_CHANNEL_OR_GUILD_ID_REQUIRED - "
+        "A channel or guild context is required.; "
+        "content - This value is invalid.]"
+    )

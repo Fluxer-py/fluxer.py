@@ -1,11 +1,17 @@
+"""Channel helpers and public types for fluxer.py.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Generator
 from typing import TYPE_CHECKING, Any
 
-from fluxer.utils import process_embed_args
+from ..utils import process_embed_args
+from .user import User
 
 from ..enums import ChannelType
 from ..fluxer_models import (
@@ -20,6 +26,7 @@ from ..fluxer_models import (
 from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
+    from ..invite import Invite
     from ..client import Client
     from ..file import File
     from ..http import HTTPClient
@@ -31,9 +38,9 @@ if TYPE_CHECKING:
 
 class _TypingContext:
     def __init__(self, channel: Channel) -> None:
-        self.channel = channel
+        self.channel: Channel = channel
 
-    def __await__(self):
+    def __await__(self) -> Generator[Any, None, None]:
         return self._send().__await__()
 
     async def __aenter__(self) -> _TypingContext:
@@ -49,7 +56,41 @@ class _TypingContext:
 
 @dataclass(slots=True)
 class Channel:
-    """Represents a Fluxer channel (text, DM, voice, category, etc.)."""
+    """Represents a Fluxer channel (text, DM, voice, category, etc.).
+
+    Attributes:
+        id: The ID of the channel.
+        type: The type of the channel.
+        name: The name of the channel, present for a guild channel and for a group direct message.
+        guild_id: The ID of the guild, present only for a guild text, voice, category, or link channel.
+        position: The sort position, present only for a guild channel.
+        topic: The topic of the channel, present only for a guild text or voice channel.
+        nsfw: Whether the channel has its own age restriction, present only for a guild channel.
+        parent_id: The ID of the parent category, null when the channel sits at the top level.
+        url: The destination URL, present only for a guild link channel.
+        icon: The icon hash, present only for a group direct message.
+        rtc_region: The ID of the selected RTC region, present only for a guild voice channel.
+        last_pin_timestamp: The time a message was most recently pinned, or null when nothing has ever been pinned.
+        content_warning_text: The content warning text stored on this channel, or null when the channel inherits.
+        bitrate: The voice bitrate in bits per second, present only for a guild voice channel.
+        user_limit: The configured member occupancy limit, present only for a guild voice channel.
+        voice_connection_limit: The number of simultaneous voice connections one user may hold, present only for a guild voice channel.
+        owner_id: The ID of the owner, present only for a group direct message.
+        last_message_id: The ID of the most recent message, null when the channel has none.
+        nsfw_override: Whether this channel overrides the inherited age restriction, or null when it inherits.
+        content_warning_level: The content warning level stored on this channel, present only for a guild channel.
+        rate_limit_per_user: The slowmode interval in seconds, present only for a guild text or voice channel.
+        permission_overwrites: The overwrites applied to this channel, present only for a guild channel.
+        nicks: The group direct message nicknames keyed by the decimal user ID (each 1-32 characters).
+        recipients: The other recipients of a direct message or group direct message (max 49).
+        guild: Guild.
+        mention: Mention.
+        created_at: Return the UTC creation time encoded in this object's snowflake.
+        is_text_channel: Whether this is a guild text channel.
+        is_voice_channel: Whether this is a voice channel.
+        is_dm: Whether this is a DM channel.
+        is_category: Whether this is a category channel.
+    """
 
     id: int
     type: int
@@ -60,11 +101,37 @@ class Channel:
     nsfw: bool = False
     parent_id: int | None = None
 
+    url: str | None = None
+    icon: str | None = None
+    rtc_region: str | None = None
+    last_pin_timestamp: str | None = None
+    content_warning_text: str | None = None
+    bitrate: int | None = None
+    user_limit: int | None = None
+    voice_connection_limit: int | None = None
+    owner_id: int | None = None
+    last_message_id: int | None = None
+    nsfw_override: bool | None = None
+    content_warning_level: int = 0
+    rate_limit_per_user: int = 0
+    permission_overwrites: list[dict[str, Any]] = field(default_factory=list)
+    nicks: dict[str, str] = field(default_factory=dict)
+    recipients: list[User] = field(default_factory=list)
+
     _http: HTTPClient | None = field(default=None, repr=False)
     _guild: Guild | None = field(default=None, repr=False)
 
     @classmethod
     def from_data(cls, data: dict[str, Any], http: HTTPClient | None = None) -> Channel:
+        """Build a Channel from its decoded payload.
+
+        Args:
+            data: Decoded payload to parse; omitted fields retain the parser's documented defaults.
+            http: Transport to bind for subsequent operations; None creates an unbound model.
+
+        Returns:
+            A parsed Channel instance.
+        """
         return cls(
             id=int(data["id"]),
             type=data["type"],
@@ -74,39 +141,92 @@ class Channel:
             topic=data.get("topic"),
             nsfw=data.get("nsfw", False),
             parent_id=int(data["parent_id"]) if data.get("parent_id") else None,
+            url=data.get("url", None),
+            icon=data.get("icon", None),
+            rtc_region=data.get("rtc_region", None),
+            last_pin_timestamp=data.get("last_pin_timestamp", None),
+            content_warning_text=data.get("content_warning_text", None),
+            bitrate=data.get("bitrate", None),
+            user_limit=data.get("user_limit", None),
+            voice_connection_limit=data.get("voice_connection_limit", None),
+            owner_id=int(data["owner_id"])
+            if data.get("owner_id") is not None
+            else None,
+            last_message_id=int(data["last_message_id"])
+            if data.get("last_message_id") is not None
+            else None,
+            nsfw_override=data.get("nsfw_override", None),
+            content_warning_level=data.get("content_warning_level", 0),
+            rate_limit_per_user=data.get("rate_limit_per_user", 0),
+            permission_overwrites=list(data.get("permission_overwrites", [])),
+            nicks=dict(data.get("nicks", {})),
+            recipients=[
+                User.from_data(user, http) for user in data.get("recipients", [])
+            ],
             _http=http,
         )
 
     @property
     def guild(self) -> Guild | None:
+        """Guild.
+
+        Returns:
+            The result of this operation.
+        """
         return self._guild
 
     @property
     def mention(self) -> str:
+        """Mention.
+
+        Returns:
+            The result of this operation.
+        """
         return f"<#{self.id}>"
 
     @property
     def created_at(self) -> datetime:
+        """Return the UTC creation time encoded in this object's snowflake.
+
+        Returns:
+            The result of this operation.
+        """
         return snowflake_to_datetime(self.id)
 
     @property
     def is_text_channel(self) -> bool:
-        """Whether this is a guild text channel."""
+        """Whether this is a guild text channel.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+        """
         return self.type == ChannelType.GUILD_TEXT
 
     @property
     def is_voice_channel(self) -> bool:
-        """Whether this is a voice channel."""
+        """Whether this is a voice channel.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+        """
         return self.type == ChannelType.GUILD_VOICE
 
     @property
     def is_dm(self) -> bool:
-        """Whether this is a DM channel."""
+        """Whether this is a DM channel.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+        """
         return self.type == ChannelType.DM
 
     @property
     def is_category(self) -> bool:
-        """Whether this is a category channel."""
+        """Whether this is a category channel.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+        """
         return self.type == ChannelType.GUILD_CATEGORY
 
     async def send(
@@ -131,13 +251,14 @@ class Channel:
             files: Multiple File objects to attach.
             message_reference: Reference to another message for replies.
             allowed_mentions: Controls which mentions notify users.
+            **kwargs: Additional options forwarded to the underlying operation.
 
         Returns:
             The created Message object.
 
         Examples:
             # Send a file from path
-            from fluxer import File
+            from ..file import File
             await channel.send("Hello!", file=File("image.png"))
 
             # Send multiple files
@@ -219,7 +340,14 @@ class Channel:
         return msgs
 
     def get_partial_message(self, message_id: int | str) -> PartialMessage:
-        """Return a lightweight message handle for this channel."""
+        """Return a lightweight message handle for this channel.
+
+        Args:
+            message_id: Identity of the message used by this operation.
+
+        Returns:
+            The requested partial message.
+        """
         from .message import PartialMessage
 
         return PartialMessage(
@@ -238,7 +366,17 @@ class Channel:
         after: int | str | None = None,
         around: int | str | None = None,
     ) -> AsyncIterator[Message]:
-        """Iterate over recent messages in this channel."""
+        """Iterate over recent messages in this channel.
+
+        Args:
+            limit: Maximum entries in the requested page; the route's documented bounds apply.
+            before: Exclusive upper cursor for this operation's page.
+            after: Exclusive lower message-ID cursor for the requested page.
+            around: Message ID around which to centre the requested history page.
+
+        Yields:
+            Each message from the requested page, bound to known channel and guild context.
+        """
         from .message import Message
 
         if self._http is None:
@@ -266,7 +404,18 @@ class Channel:
         after: int | str | None = None,
         around: int | str | None = None,
     ) -> list[Message]:
-        """Delete recent messages selected by an optional predicate."""
+        """Delete recent messages selected by an optional predicate.
+
+        Args:
+            limit: Maximum entries in the requested page; the route's documented bounds apply.
+            check: Condition used to select a message or accept an event.
+            before: Exclusive upper cursor for this operation's page.
+            after: Exclusive lower message-ID cursor for the requested page.
+            around: Message ID around which to centre the requested history page.
+
+        Returns:
+            The result of this operation.
+        """
         deleted: list[Message] = []
         async for message in self.history(
             limit=limit,
@@ -289,9 +438,13 @@ class Channel:
         self,
         *,
         limit: int | None = None,
-        before: int | str | None = None,
+        before: str | None = None,
     ) -> list[Message]:
-        """Fetch all pinned messages from this channel.
+        """Fetch one page of pinned messages from this channel.
+
+        Args:
+            limit: Page size accepted by the pins endpoint.
+            before: ISO8601 pin timestamp bounding this page.
 
         Returns:
             A list of pinned Message objects.
@@ -304,7 +457,7 @@ class Channel:
         data = await self._http.get_pinned_messages(self.id, limit=limit, before=before)
         msgs = [
             Message.from_data(msg_data.get("message", msg_data), self._http)
-            for msg_data in data
+            for msg_data in data["items"]
         ]
         for msg in msgs:
             msg._channel = self
@@ -312,7 +465,11 @@ class Channel:
         return msgs
 
     async def ack_pins(self) -> None:
-        """Acknowledge this channel's current pin state."""
+        """Acknowledge this channel's current pin state.
+
+        Returns:
+            None.
+        """
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
         if hasattr(self._http, "ack_pins"):
@@ -320,8 +477,12 @@ class Channel:
         else:
             await self._http.acknowledge_pins(self.id)
 
-    async def invites(self) -> list[Any]:
-        """Fetch invites for this channel."""
+    async def invites(self) -> list[Invite]:
+        """Fetch invites for this channel.
+
+        Returns:
+            The result of this operation.
+        """
         from ..invite import Invite
 
         if self._http is None:
@@ -329,8 +490,15 @@ class Channel:
         data = await self._http.get_channel_invites(self.id)
         return [Invite.from_data(item, self._http) for item in data]
 
-    async def create_invite(self, **kwargs: Any) -> Any:
-        """Create an invite for this channel."""
+    async def create_invite(self, **kwargs: Any) -> Invite:
+        """Create an invite for this channel.
+
+        Args:
+            **kwargs: Additional options forwarded to the underlying operation.
+
+        Returns:
+            The result of this operation.
+        """
         from ..invite import Invite
 
         if self._http is None:
@@ -344,6 +512,8 @@ class Channel:
         Args:
             message_ids: A list of message IDs to delete.
 
+        Returns:
+            None.
         """
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
@@ -351,15 +521,22 @@ class Channel:
         await self._http.delete_messages(self.id, message_ids)
 
     async def trigger_typing(self) -> None:
-        """Trigger a typing indicator in this channel."""
+        """Trigger a typing indicator in this channel.
 
+        Returns:
+            None.
+        """
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         return await self._http.trigger_typing(self.id)
 
     def typing(self) -> _TypingContext:
-        """Return a typing indicator helper for this channel."""
+        """Return a typing indicator helper for this channel.
+
+        Returns:
+            The result of this operation.
+        """
         return _TypingContext(self)
 
     async def search_messages(
@@ -397,7 +574,44 @@ class Channel:
         sort_by: SearchSortBy | None = None,
         sort_order: SearchSortOrder | None = None,
     ) -> SearchResponse:
-        """Search messages in this channel using Fluxer's current scope."""
+        """Search messages in this channel using Fluxer's current scope.
+
+        Args:
+            hits_per_page: Maximum search hits requested in one result page.
+            page: Page number passed to the search operation.
+            cursor: Opaque search continuation values from the preceding result.
+            min_id: Lower message-ID bound for search results.
+            max_id: Upper message-ID bound for search results.
+            content: Text content sent in the message.
+            contents: Contents used by this operation.
+            exact_phrases: Exact phrases used by this operation.
+            exclude_channel_id: Identity of the exclude channel used by this operation.
+            author_id: Identity of the author used by this operation.
+            exclude_author_id: Identity of the exclude author used by this operation.
+            author_type: Author type used by this operation.
+            exclude_author_type: Author type values excluded from search results.
+            mentions: Mentions used by this operation.
+            exclude_mentions: Mentions values excluded from search results.
+            mention_everyone: Mention everyone used by this operation.
+            pinned: Pinned used by this operation.
+            has: Has used by this operation.
+            exclude_has: Has values excluded from search results.
+            embed_type: Embed type used by this operation.
+            exclude_embed_type: Embed type values excluded from search results.
+            embed_provider: Embed provider used by this operation.
+            exclude_embed_provider: Embed provider values excluded from search results.
+            link_hostname: Link hostname used by this operation.
+            exclude_link_hostname: Link hostname values excluded from search results.
+            attachment_filename: Attachment filename used by this operation.
+            exclude_attachment_filename: Attachment filename values excluded from search results.
+            attachment_extension: Attachment extension used by this operation.
+            exclude_attachment_extension: Attachment extension values excluded from search results.
+            sort_by: Sort by used by this operation.
+            sort_order: Sort order used by this operation.
+
+        Returns:
+            The result of this operation.
+        """
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
         data = await self._http.search_messages(
@@ -447,6 +661,14 @@ class Channel:
         """Join this voice channel and return a connected VoiceClient.
 
         Requires fluxer.py[voice].
+
+        Args:
+            client: Client used by this operation.
+            self_mute: Whether this voice connection starts with the local microphone muted.
+            self_deaf: Whether this voice connection starts locally deafened.
+
+        Returns:
+            The result of this operation.
         """
         if not self.is_voice_channel:
             raise TypeError(f"Cannot connect to a non-voice channel (type={self.type})")
@@ -457,7 +679,23 @@ class Channel:
         )
 
     def __eq__(self, other: object) -> bool:
+        """Compare this object with another value using its identity semantics.
+
+        Args:
+            other: Other operand used for comparison.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+        """
         return isinstance(other, Channel) and self.id == other.id
 
     def __hash__(self) -> int:
+        """Return the hash used for identity-based collection lookup.
+
+        Returns:
+            The result of this operation.
+        """
         return hash(self.id)
+
+
+__all__ = ("Channel",)

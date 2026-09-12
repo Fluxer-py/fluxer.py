@@ -1,3 +1,8 @@
+"""Init helpers and public types for fluxer.py.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 __version__ = "0.4.2"
 __title__ = "fluxer.py"
 __author__ = "Emil"
@@ -64,7 +69,7 @@ from .models import (
 
 # Voice support is optional so only import if available
 try:
-    from .voice import FFmpegPCMAudio, VoiceClient
+    from .voice import FFmpegPCMAudio as FFmpegPCMAudio, VoiceClient as VoiceClient
 except ImportError:
     pass
 
@@ -140,6 +145,8 @@ __all__ = [
     "datetime_to_snowflake",
     "snowflake_to_datetime",
     # Voice (present only when the 'voice' extra is installed)
-    "FFmpegPCMAudio",
-    "VoiceClient",
 ]
+
+# Optional names are exported only when the integration imported successfully.
+if "VoiceClient" in globals():
+    __all__.extend(["FFmpegPCMAudio", "VoiceClient"])

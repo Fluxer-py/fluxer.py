@@ -1,3 +1,8 @@
+"""Legacy command decorators using guild membership and effective channel permissions.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -5,6 +10,7 @@ import functools
 from typing import Callable, Coroutine, Any
 
 from .enums import Permissions
+from .permissions import _effective_permissions
 from .models.member import GuildMember
 from .models.message import Message
 
@@ -33,6 +39,9 @@ def has_role(
         @fluxer.checks.has_role(id=987654321098765432)
         async def secret(ctx):
             await ctx.reply("You found the secret command!")
+
+    Returns:
+        The configured decorator or callback wrapper.
     """
 
     def decorator(func: EventHandler) -> EventHandler:
@@ -104,6 +113,9 @@ def has_permission(permission: Permissions) -> Callable[[EventHandler], EventHan
         @fluxer.checks.has_permission(Permissions.KICK_MEMBERS | Permissions.BAN_MEMBERS)
         async def punish(ctx):
             await ctx.reply("You can kick and ban.")
+
+    Returns:
+        The configured decorator or callback wrapper.
     """
 
     def decorator(func: EventHandler) -> EventHandler:
@@ -127,22 +139,10 @@ def has_permission(permission: Permissions) -> Callable[[EventHandler], EventHan
                 ctx._http.get_guild_roles(ctx.guild_id),
             )
 
-            # If the user is the guild owner, they bypass all permission checks
-            if ctx.author.id == int(guild_data["owner_id"]):
-                await func(*args, **kwargs)
-                return
-
-            member_role_ids = {int(r) for r in member_data.get("roles", [])}
-            computed = 0
-            for role in roles_data:
-                role_id = int(role["id"])
-                if role_id == ctx.guild_id or role_id in member_role_ids:
-                    computed |= int(role["permissions"])
-
-            # If a user has admin, they bypass all permission checks
-            if computed & Permissions.ADMINISTRATOR:
-                await func(*args, **kwargs)
-                return
+            channel_data = await ctx._http.get_channel(ctx.channel_id)
+            computed = _effective_permissions(
+                guild_data, member_data, roles_data, ctx.author.id, channel_data
+            )
 
             if (computed & int(permission)) != int(permission):
                 await ctx.reply("You don't have permission to use this command.")
@@ -157,3 +157,6 @@ def has_permission(permission: Permissions) -> Callable[[EventHandler], EventHan
         return wrapper
 
     return decorator
+
+
+__all__ = ("has_role", "has_permission")

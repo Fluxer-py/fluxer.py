@@ -1,12 +1,20 @@
 # Changelog
 
-## [0.5.0-alpha.1] (development) - 2026-03-30
+## [0.5.0-alpha.2] (development) - 2026-09-12
+
+### Added, Changed & Fixed
+
+A lot of things, again :)
+
+This update changes basically every file to ensure that all of them follow Python >3.10 practices, code formatting and docstring formatting for future documentation. It also synchronizes the entire codebase to the current (2026-09-11) [Fluxer API documentation](https://docs.fluxer.app) to ensure that we use the right ratelimits and practices.
+
+## [0.5.0-alpha.1] (development) - 2026-09-07
 
 ### Added
 
 - New API usage: message search
 
-## [0.5.0] (development) - 2026-03-30
+## [0.5.0] (development) - 2026-09-02
 
 ### Added, Changed & Fixed
 

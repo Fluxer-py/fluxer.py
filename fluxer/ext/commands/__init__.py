@@ -1,3 +1,8 @@
+"""Init helpers and public types for fluxer.py.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from .bot import AutoShardedBot, Bot, when_mentioned, when_mentioned_or
 from .cog import Cog
 from .context import Context

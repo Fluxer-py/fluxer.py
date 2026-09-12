@@ -1,3 +1,8 @@
+"""Channel helpers and public types for fluxer.py.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 from .enums import ChannelType
@@ -10,7 +15,7 @@ DMChannel = Channel
 GroupChannel = Channel
 
 
-def _channel_factory(channel_type: int):
+def _channel_factory(channel_type: int) -> tuple[type[Channel], ChannelType | int]:
     try:
         return Channel, ChannelType(channel_type)
     except ValueError:
@@ -24,5 +29,4 @@ __all__ = (
     "CategoryChannel",
     "DMChannel",
     "GroupChannel",
-    "_channel_factory",
 )

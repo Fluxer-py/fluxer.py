@@ -1,3 +1,8 @@
+"""Client lifecycle, parsed dispatches, bounded caches, and legacy command support.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +11,8 @@ import importlib.util
 import inspect
 import logging
 import sys
+import warnings
+import uuid
 from collections.abc import Awaitable, Iterable
 from typing import TYPE_CHECKING, Any, Callable, Coroutine, TypeVar
 
@@ -14,6 +21,7 @@ if TYPE_CHECKING:
     from .voice import VoiceClient
 
 from .enums import Intents
+from ._types import UNSET, UnsetType
 from .errors import GatewayNotConnected
 from .events import fluxer_event_from_dispatch
 from .fluxer_models import (
@@ -29,6 +37,7 @@ from .gateway import Gateway
 from .http import HTTPClient
 from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webhook
 from .models.role import Role
+from .models.member import GuildMember
 from .state import ConnectionState
 
 log = logging.getLogger(__name__)
@@ -43,35 +52,63 @@ class Client:
     This gives you full control over the gateway lifecycle.
     For most bots, use the Bot subclass instead.
 
-    Args:
-        intents: Gateway intents to request (default: Intents.default())
-        api_url: Base URL for the Fluxer API (default: https://api.fluxer.app/v1)
-                 Use this to connect to self-hosted Fluxer instances
+    Attributes:
+        intents: Deprecated compatibility mask; it does not filter Fluxer Gateway events.
+        api_url: Already-versioned REST override, or the base resolved after discovery.
+        instance_url: Origin used for unauthenticated instance discovery.
+        user: The bot user, available after the READY event.
+        guilds: List of guilds the bot is in (populated from READY + GUILD_CREATE).
+        loop: Return the active asyncio event loop.
+        cached_messages: Messages currently retained by the in-memory message cache.
     """
 
     def __init__(
         self,
         *,
-        intents: Intents = Intents.default(),
+        intents: Intents | None = None,
         api_url: str | None = None,
+        instance_url: str | None = None,
         max_retries: int = 5,
         retry_forever: bool = False,
         max_messages: int = 1000,
         cache_members: bool = True,
     ) -> None:
-        self.intents = intents
-        self.api_url = api_url
+        """Initialize the client with the supplied configuration.
+
+        Args:
+            intents: Deprecated compatibility mask; Fluxer does not use intents to filter events.
+            api_url: Already-versioned REST service override, including any instance path prefix.
+            instance_url: Origin publishing the unauthenticated Fluxer discovery document.
+            max_retries: Maximum retries after the initial request; zero disables retries.
+            retry_forever: Whether replayable transient failures may retry without a ceiling.
+            max_messages: Max messages used by this operation.
+            cache_members: Cache members used by this operation.
+        """
+        if intents is not None:
+            warnings.warn(
+                "Intents are a deprecated compatibility option; Fluxer does not filter Gateway events by intents",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.intents: Intents = intents if intents is not None else Intents.default()
+        self.api_url: str | None = api_url
+        self.instance_url: str | None = instance_url
         self._http: HTTPClient | None = None
         self._gateway: Gateway | None = None
         self._event_handlers: dict[str, list[EventHandler]] = {}
+        self._handler_tasks: set[asyncio.Task[None]] = set()
         self._user: User | None = None
+        self._users: dict[int, User] = {}
         self._state = ConnectionState(
             max_messages=max_messages, cache_members=cache_members
         )
         self._guilds = self._state.guilds
         self._channels = self._state.channels
         self._voice_states = self._state.voice_states
+        self._voice_tombstones: dict[tuple[int, int, str | None], VoiceState] = {}
         self._pending_voice: dict[int, VoiceClient] = {}
+        self._active_voice: dict[int, VoiceClient] = {}
+        self._voice_mutations: dict[str, VoiceClient] = {}
         self._closed: bool = False
         self._ready = asyncio.Event()
         self._waiters: dict[
@@ -82,32 +119,56 @@ class Client:
 
     @property
     def user(self) -> User | None:
-        """The bot user, available after the READY event."""
+        """The bot user, available after the READY event.
+
+        Returns:
+            The result of this operation.
+        """
         return self._user
 
     @property
     def guilds(self) -> list[Guild]:
-        """List of guilds the bot is in (populated from READY + GUILD_CREATE)."""
+        """List of guilds the bot is in (populated from READY + GUILD_CREATE).
+
+        Returns:
+            The result of this operation.
+        """
         return list(self._guilds.values())
 
     def is_ready(self) -> bool:
-        """Return whether the READY event has been received."""
+        """Return whether the READY event has been received.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+        """
         return self._ready.is_set()
 
     def is_closed(self) -> bool:
-        """Return whether the client has been closed."""
+        """Return whether the client has been closed.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+        """
         return self._closed
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
-        """Return the active asyncio event loop."""
+        """Return the active asyncio event loop.
+
+        Returns:
+            The result of this operation.
+        """
         try:
             return asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.get_event_loop()
 
     async def wait_until_ready(self) -> None:
-        """Wait until the client has received READY from the gateway."""
+        """Wait until the client has received READY from the gateway.
+
+        Returns:
+            None.
+        """
         await self._ready.wait()
 
     async def wait_for(
@@ -117,7 +178,16 @@ class Client:
         check: Callable[..., bool] | None = None,
         timeout: float | None = None,
     ) -> Any:
-        """Wait until a Fluxer event matching ``check`` is dispatched."""
+        """Wait until a Fluxer event matching `check` is dispatched.
+
+        Args:
+            event: Event name used for registration or webhook callback headers.
+            check: Condition used to select a message or accept an event.
+            timeout: Maximum seconds to wait before raising a timeout error.
+
+        Returns:
+            The result of this operation.
+        """
         event_name = event[3:] if event.startswith("on_") else event
         future: asyncio.Future[Any] = self.loop.create_future()
         waiter = (future, check)
@@ -132,20 +202,45 @@ class Client:
                 self._waiters.pop(event_name, None)
 
     def get_guild(self, id: int | str) -> Guild | None:
+        """Get guild.
+
+        Args:
+            id: Identity of the object used by this operation.
+
+        Returns:
+            The requested guild, or None when no matching value is available.
+        """
         try:
             return self._guilds.get(int(id))
         except (TypeError, ValueError):
             return None
 
     def get_channel(self, id: int | str) -> Channel | None:
-        """Return a cached channel by ID, if available."""
+        """Return a cached channel by ID, if available.
+
+        Args:
+            id: Identity of the object used by this operation.
+
+        Returns:
+            The requested channel, or None when no matching value is available.
+        """
         try:
             return self._channels.get(int(id))
         except (TypeError, ValueError):
             return None
 
-    def get_member(self, guild_id: int | str | None, user_id: int | str) -> Any | None:
-        """Return a cached guild member by guild and user ID, if available."""
+    def get_member(
+        self, guild_id: int | str | None, user_id: int | str
+    ) -> GuildMember | None:
+        """Return a cached guild member by guild and user ID, if available.
+
+        Args:
+            guild_id: Identity of the guild used by this operation.
+            user_id: Identity of the user used by this operation.
+
+        Returns:
+            The requested member, or None when no matching value is available.
+        """
         try:
             guild_key = int(guild_id) if guild_id is not None else None
             user_key = int(user_id)
@@ -154,12 +249,23 @@ class Client:
         return self._state.get_member(guild_key, user_key)
 
     def get_message(self, message_id: int | str | None) -> Message | None:
-        """Return a cached message by ID, if available."""
+        """Return a cached message by ID, if available.
+
+        Args:
+            message_id: Identity of the message used by this operation.
+
+        Returns:
+            The requested message, or None when no matching value is available.
+        """
         return self._state.get_message(message_id)
 
     @property
     def cached_messages(self) -> list[Message]:
-        """Messages currently retained by the in-memory message cache."""
+        """Messages currently retained by the in-memory message cache.
+
+        Returns:
+            The result of this operation.
+        """
         return list(self._state.messages.values())
 
     # =========================================================================
@@ -184,6 +290,12 @@ class Client:
             on_member_join  -> GUILD_MEMBER_ADD
             on_member_remove -> GUILD_MEMBER_REMOVE
             ... and any other gateway event as on_{lowercase_name}
+
+        Args:
+            func: Callable registered or applied by this helper.
+
+        Returns:
+            The result of this operation.
         """
         event_name = func.__name__
         if not event_name.startswith("on_"):
@@ -201,6 +313,12 @@ class Client:
             @bot.on("message")
             async def handle_msg(message):
                 ...
+
+        Args:
+            event_name: Event name dispatched to registered callbacks.
+
+        Returns:
+            The configured decorator or callback wrapper.
         """
 
         def decorator(func: EventHandler) -> EventHandler:
@@ -227,13 +345,34 @@ class Client:
         # Map gateway event names to handler names and parse data
         match event_name:
             case "READY":
+                self._state.guilds.clear()
+                self._state.channels.clear()
+                self._state.members.clear()
+                self._state.messages.clear()
+                self._state.voice_states.clear()
+                self._voice_tombstones.clear()
                 self._user = User.from_data(data["user"], self._http)
+                self._users = {
+                    int(u["id"]): User.from_data(u, self._http)
+                    for u in data.get("users", [])
+                }
+                self._users[self._user.id] = self._user
+                if self._http is not None:
+                    self._http._user_id = self._user.id
                 # Process guilds from READY
                 for guild_data in data.get("guilds", []):
                     guild = Guild.from_data(guild_data, self._http)
                     self._state.store_guild(guild)
+                    for channel in guild.channels:
+                        self._state.store_channel(channel)
+                    for member_data in guild_data.get("members", []):
+                        self._store_member(member_data, guild.id)
                     self._seed_guild_voice_states(
                         guild.id, guild_data.get("voice_states", [])
+                    )
+                for channel_data in data.get("private_channels", []):
+                    self._state.store_channel(
+                        Channel.from_data(channel_data, self._http)
                     )
                 self._ready.set()
                 await self._fire("on_ready")
@@ -247,29 +386,69 @@ class Client:
                 await self._fire("on_message_edit", message)
 
             case "MESSAGE_DELETE":
+                self._state.remove_message(data["id"])
                 await self._fire("on_message_delete", data)
 
-            case "GUILD_CREATE":
-                guild = Guild.from_data(data, self._http)
-                self._state.store_guild(guild)
-                # Cache channels from guild
-                for ch_data in data.get("channels", []):
-                    ch = Channel.from_data(ch_data, self._http)
-                    ch._guild = guild
-                    self._state.store_channel(ch)
-                self._seed_guild_voice_states(guild.id, data.get("voice_states", []))
-                await self._fire("on_guild_join", guild)
+            case "MESSAGE_DELETE_BULK":
+                for message_id in data.get("ids", []):
+                    self._state.remove_message(message_id)
+                await self._fire("on_message_delete_bulk", data)
+
+            case "GUILD_CREATE" | "GUILD_SYNC" | "GUILD_UPDATE":
+                guild = self._replace_guild_snapshot(data)
+                if event_name == "GUILD_CREATE":
+                    await self._fire("on_guild_join", guild)
+                else:
+                    await self._fire(f"on_{event_name.lower()}", data)
+                    await self._fire(
+                        "on_fluxer_event", fluxer_event_from_dispatch(event_name, data)
+                    )
 
             case "GUILD_DELETE":
                 guild_id = int(data["id"])
-                guild = self._guilds.pop(guild_id, None)
+                guild = self._guilds.get(guild_id)
+                if data.get("unavailable", False):
+                    if guild is None:
+                        guild = Guild.from_data(data, self._http)
+                        self._state.store_guild(guild)
+                    guild.unavailable = True
+                else:
+                    self._guilds.pop(guild_id, None)
+                    for channel_id in [
+                        key
+                        for key, ch in self._channels.items()
+                        if ch.guild_id == guild_id
+                    ]:
+                        self._channels.pop(channel_id)
+                    for key in [
+                        key for key in self._state.members if key[0] == guild_id
+                    ]:
+                        self._state.members.pop(key)
+                    for message_id, message in list(self._state.messages.items()):
+                        if message.guild_id == guild_id:
+                            self._state.remove_message(message_id)
+                    self._voice_states.pop(guild_id, None)
+                    self._clear_voice_tombstones(guild_id)
                 await self._fire("on_guild_remove", guild or data)
 
             case "GUILD_MEMBER_ADD":
+                self._store_member(data, int(data["guild_id"]))
                 await self._fire("on_member_join", data)
 
             case "GUILD_MEMBER_REMOVE":
+                self._state.members.pop(
+                    (int(data["guild_id"]), int(data["user"]["id"])), None
+                )
                 await self._fire("on_member_remove", data)
+
+            case "GUILD_MEMBER_UPDATE":
+                self._store_member(data, int(data["guild_id"]))
+                await self._fire("on_guild_member_update", data)
+
+            case "GUILD_MEMBERS_CHUNK":
+                for member_data in data.get("members", []):
+                    self._store_member(member_data, int(data["guild_id"]))
+                await self._fire("on_guild_members_chunk", data)
 
             case "CHANNEL_CREATE":
                 channel = Channel.from_data(data, self._http)
@@ -303,19 +482,31 @@ class Client:
                 await self._fire("on_voice_state_update", voice_state)
 
             case "VOICE_SERVER_UPDATE":
+                if data.get("guild_id") is None:
+                    return
                 guild_id = int(data["guild_id"])
-                vc = self._pending_voice.pop(guild_id, None)
-                if vc:
-                    bot_user_id = self._user.id if self._user else None
-                    cached_state = (
-                        self.get_voice_state(guild_id, bot_user_id)
-                        if bot_user_id is not None
-                        else None
+                vc = self._pending_voice.get(guild_id) or self._active_voice.get(
+                    guild_id
+                )
+                if vc is not None and int(data["channel_id"]) == vc.channel_id:
+                    if data.get("connection_id") is not None:
+                        vc._connection_id = data["connection_id"]
+                    if data.get("e2ee_key") is not None:
+                        vc._reject_placement(
+                            "This voice integration cannot consume an encrypted grant"
+                        )
+                    elif data.get("connection_id") is not None:
+                        await vc._on_voice_server_update(
+                            data["endpoint"], data["token"], data["connection_id"]
+                        )
+
+            case "VOICE_STATE_ACK":
+                vc = self._voice_mutations.get(data.get("mutation_id", ""))
+                if vc is not None and data.get("error_code"):
+                    vc._reject_placement(
+                        f"Voice placement rejected: {data['error_code']}"
                     )
-                    session_id = cached_state.session_id if cached_state else ""
-                    await vc._on_voice_server_update(
-                        data["endpoint"], data["token"], session_id or ""
-                    )
+                await self._fire("on_voice_state_ack", data)
 
             case "RESUMED":
                 await self._fire("on_resumed")
@@ -346,10 +537,11 @@ class Client:
                 guild_id = int(data["guild_id"])
                 guild = self._guilds.get(guild_id)
                 if guild is not None:
-                    guild.roles = [
-                        Role.from_data(role_data, self._http, guild_id)
-                        for role_data in data.get("roles", [])
-                    ]
+                    roles = {role.id: role for role in guild.roles}
+                    for role_data in data.get("roles", []):
+                        role = Role.from_data(role_data, self._http, guild_id)
+                        roles[role.id] = role
+                    guild.roles = list(roles.values())
                 await self._fire(
                     "on_fluxer_event", fluxer_event_from_dispatch(event_name, data)
                 )
@@ -361,6 +553,49 @@ class Client:
                 await self._fire(
                     "on_fluxer_event", fluxer_event_from_dispatch(event_name, data)
                 )
+
+    def _replace_guild_snapshot(self, data: dict[str, Any]) -> Guild:
+        """Replace supplied guild collections and rebind retained cache entries."""
+        guild = Guild.from_data(data, self._http)
+        previous = self._guilds.get(guild.id)
+        if previous is not None:
+            for name in ("roles", "channels", "members", "emojis", "stickers"):
+                if name not in data:
+                    setattr(guild, name, getattr(previous, name))
+        self._state.store_guild(guild)
+        if "channels" in data:
+            for channel_id, channel in list(self._channels.items()):
+                if channel.guild_id == guild.id:
+                    self._channels.pop(channel_id)
+            for channel in guild.channels:
+                self._state.store_channel(channel)
+        for channel in self._channels.values():
+            if channel.guild_id == guild.id:
+                channel._guild = guild
+        if "members" in data:
+            for key in list(self._state.members):
+                if key[0] == guild.id:
+                    self._state.members.pop(key)
+            guild.members = [
+                self._store_member(item, guild.id) for item in data["members"]
+            ]
+        if "voice_states" in data:
+            self._voice_states.pop(guild.id, None)
+            self._clear_voice_tombstones(guild.id)
+            self._seed_guild_voice_states(guild.id, data["voice_states"])
+        for message in self._state.messages.values():
+            if message.guild_id == guild.id:
+                message._cache_guild(guild)
+                message._channel = self._channels.get(message.channel_id)
+        return guild
+
+    def _store_member(self, data: dict[str, Any], guild_id: int) -> GuildMember:
+        member = GuildMember.from_data(data, self._http, guild_id=guild_id)
+        if not member.user.username and member.user.id in self._users:
+            member.user = self._users[member.user.id]
+        else:
+            self._users[member.user.id] = member.user
+        return self._state.store_member(member)
 
     def _parse_message(self, data: dict[str, Any]) -> Message:
         """Parse message data and attach cached channel and guild references."""
@@ -375,6 +610,10 @@ class Client:
             cached_guild = self._guilds.get(guild_id)
             if cached_guild:
                 msg._cache_guild(cached_guild)
+        if data.get("member") is not None and guild_id is not None:
+            msg.member = self._store_member(
+                {**data["member"], "user": data["author"]}, guild_id
+            )
         return self._state.store_message(msg)
 
     async def _handle_reaction_add(self, data: dict[str, Any]) -> None:
@@ -383,20 +622,12 @@ class Client:
 
         raw = RawReactionActionEvent.from_data(data, "REACTION_ADD")
 
-        # Fire raw event (always fires, even if message not cached)
+        message = self._state.get_message(raw.message_id)
+        if message is not None:
+            reaction = message._add_reaction(data, raw.emoji, raw.user_id)
+            if self.user is not None and raw.user_id == self.user.id:
+                reaction.me = True
         await self._fire("on_raw_reaction_add", raw)
-
-        # Search through channels for the message.
-        # Message caching is not implemented yet.
-        for channel in self._channels.values():
-            # Placeholder for future message cache lookup.
-            pass
-
-        # For now, we'll just fire the raw event
-        # In a complete implementation, you would:
-        # 1. Check message cache
-        # 2. Update message reactions
-        # 3. Fire on_reaction_add with the full Reaction object
 
     async def _handle_reaction_remove(self, data: dict[str, Any]) -> None:
         """Handle MESSAGE_REACTION_REMOVE event."""
@@ -405,6 +636,12 @@ class Client:
         raw = RawReactionActionEvent.from_data(data, "REACTION_REMOVE")
 
         # Fire raw event (always fires, even if message not cached)
+        message = self._state.get_message(raw.message_id)
+        if message is not None:
+            try:
+                message._remove_reaction(data, raw.emoji, raw.user_id)
+            except ValueError:
+                pass
         await self._fire("on_raw_reaction_remove", raw)
 
     async def _handle_reaction_remove_all(self, data: dict[str, Any]) -> None:
@@ -414,6 +651,9 @@ class Client:
         raw = RawReactionClearEvent.from_data(data)
 
         # Fire raw event (always fires, even if message not cached)
+        message = self._state.get_message(raw.message_id)
+        if message is not None:
+            message.reactions.clear()
         await self._fire("on_raw_reaction_clear", raw)
 
     async def _handle_reaction_remove_emoji(self, data: dict[str, Any]) -> None:
@@ -423,17 +663,27 @@ class Client:
         raw = RawReactionClearEmojiEvent.from_data(data)
 
         # Fire raw event (always fires, even if message not cached)
+        message = self._state.get_message(raw.message_id)
+        if message is not None:
+            message._clear_emoji(raw.emoji)
         await self._fire("on_raw_reaction_clear_emoji", raw)
 
     async def _fire(self, event_name: str, *args: Any) -> None:
         """Fire all registered handlers for an event."""
         self._dispatch_waiters(event_name, *args)
-        handlers = self._event_handlers.get(event_name, [])
-        for handler in handlers:
+
+        async def run_handler(handler: EventHandler) -> None:
             try:
                 await handler(*args)
             except Exception:
                 log.exception("Error in event handler '%s'", event_name)
+
+        for handler in self._event_handlers.get(event_name, []):
+            task = asyncio.create_task(run_handler(handler))
+            self._handler_tasks.add(task)
+            task.add_done_callback(self._handler_tasks.discard)
+        # Start callbacks without letting a callback awaiting another event block receiving it.
+        await asyncio.sleep(0)
 
     def _dispatch_waiters(self, event_name: str, *args: Any) -> None:
         waiter_name = event_name[3:] if event_name.startswith("on_") else event_name
@@ -466,7 +716,14 @@ class Client:
     # =========================================================================
 
     async def fetch_channel(self, channel_id: str) -> Channel:
-        """Fetch a channel from the API (not cache)."""
+        """Fetch a channel from the API (not cache).
+
+        Args:
+            channel_id: Identity of the channel used by this operation.
+
+        Returns:
+            The requested channel.
+        """
         assert self._http is not None
         data = await self._http.get_channel(channel_id)
         ch = Channel.from_data(data, self._http)
@@ -474,7 +731,15 @@ class Client:
         return ch
 
     async def fetch_message(self, channel_id: str, message_id: str) -> Message:
-        """Fetch a message from the API by channel ID and message ID."""
+        """Fetch a message from the API by channel ID and message ID.
+
+        Args:
+            channel_id: Identity of the channel used by this operation.
+            message_id: Identity of the message used by this operation.
+
+        Returns:
+            The requested message.
+        """
         assert self._http is not None
         data = await self._http.get_message(channel_id, message_id)
         return self._parse_message(data)
@@ -521,8 +786,49 @@ class Client:
     ) -> SearchResponse:
         """Search messages in one guild or channel using this bot client.
 
-        Bots can only use Fluxer's ``current`` scope. A guild context takes
+        Bots can only use Fluxer's `current` scope. A guild context takes
         precedence if both context IDs are supplied.
+
+        Args:
+            context_channel_id: Identity of the context channel used by this operation.
+            context_guild_id: Identity of the context guild used by this operation.
+            channel_ids: IDs of the channel resources selected by this operation.
+            channel_id: Identity of the channel used by this operation.
+            hits_per_page: Maximum search hits requested in one result page.
+            page: Page number passed to the search operation.
+            cursor: Opaque search continuation values from the preceding result.
+            min_id: Lower message-ID bound for search results.
+            max_id: Upper message-ID bound for search results.
+            content: Text content sent in the message.
+            contents: Contents used by this operation.
+            exact_phrases: Exact phrases used by this operation.
+            exclude_channel_id: Identity of the exclude channel used by this operation.
+            author_id: Identity of the author used by this operation.
+            exclude_author_id: Identity of the exclude author used by this operation.
+            author_type: Author type used by this operation.
+            exclude_author_type: Author type values excluded from search results.
+            mentions: Mentions used by this operation.
+            exclude_mentions: Mentions values excluded from search results.
+            mention_everyone: Mention everyone used by this operation.
+            pinned: Pinned used by this operation.
+            has: Has used by this operation.
+            exclude_has: Has values excluded from search results.
+            embed_type: Embed type used by this operation.
+            exclude_embed_type: Embed type values excluded from search results.
+            embed_provider: Embed provider used by this operation.
+            exclude_embed_provider: Embed provider values excluded from search results.
+            link_hostname: Link hostname used by this operation.
+            exclude_link_hostname: Link hostname values excluded from search results.
+            attachment_filename: Attachment filename used by this operation.
+            exclude_attachment_filename: Attachment filename values excluded from search results.
+            attachment_extension: Attachment extension used by this operation.
+            exclude_attachment_extension: Attachment extension values excluded from search results.
+            sort_by: Sort by used by this operation.
+            sort_order: Sort order used by this operation.
+            include_nsfw: Whether the search may include mature content accessible to the caller.
+
+        Returns:
+            The result of this operation.
         """
         if context_channel_id is None and context_guild_id is None:
             raise ValueError("A context_channel_id or context_guild_id is required")
@@ -579,12 +885,22 @@ class Client:
 
         Example:
             await client.delete_message(channel_id=123456, message_id=789012)
+
+        Returns:
+            None.
         """
         assert self._http is not None
         await self._http.delete_message(channel_id, message_id)
 
     async def fetch_guild(self, guild_id: str) -> Guild:
-        """Fetch a guild from the API."""
+        """Fetch a guild from the API.
+
+        Args:
+            guild_id: Identity of the guild used by this operation.
+
+        Returns:
+            The requested guild.
+        """
         assert self._http is not None
         data = await self._http.get_guild(guild_id)
         guild = Guild.from_data(data, self._http)
@@ -592,7 +908,14 @@ class Client:
         return guild
 
     async def fetch_user(self, user_id: str) -> User:
-        """Fetch a user from the API."""
+        """Fetch a user from the API.
+
+        Args:
+            user_id: Identity of the user used by this operation.
+
+        Returns:
+            The requested user.
+        """
         assert self._http is not None
         data = await self._http.get_user(user_id)
         return User.from_data(data, self._http)
@@ -614,22 +937,45 @@ class Client:
         """
         assert self._http is not None
         data = await self._http.get_user_profile(user_id, guild_id=guild_id)
-        return UserProfile.from_data(data, self._http)
+        return UserProfile.from_data(
+            data, self._http, guild_id=int(guild_id) if guild_id is not None else None
+        )
 
     async def fetch_webhook(self, webhook_id: str) -> Webhook:
-        """Fetch a webhook from the API."""
+        """Fetch a webhook from the API.
+
+        Args:
+            webhook_id: Identity of the webhook used by this operation.
+
+        Returns:
+            The requested webhook.
+        """
         assert self._http is not None
         data = await self._http.get_webhook(webhook_id)
         return Webhook.from_data(data, self._http)
 
     async def fetch_channel_webhooks(self, channel_id: str) -> list[Webhook]:
-        """Fetch all webhooks for a channel."""
+        """Fetch all webhooks for a channel.
+
+        Args:
+            channel_id: Identity of the channel used by this operation.
+
+        Returns:
+            The requested channel webhooks.
+        """
         assert self._http is not None
         data = await self._http.get_channel_webhooks(channel_id)
         return [Webhook.from_data(w, self._http) for w in data]
 
     async def fetch_guild_webhooks(self, guild_id: str) -> list[Webhook]:
-        """Fetch all webhooks for a guild."""
+        """Fetch all webhooks for a guild.
+
+        Args:
+            guild_id: Identity of the guild used by this operation.
+
+        Returns:
+            The requested guild webhooks.
+        """
         assert self._http is not None
         data = await self._http.get_guild_webhooks(guild_id)
         return [Webhook.from_data(w, self._http) for w in data]
@@ -637,7 +983,16 @@ class Client:
     async def create_webhook(
         self, channel_id: str, *, name: str, avatar: str | None = None
     ) -> Webhook:
-        """Create a webhook in a channel."""
+        """Create a webhook in a channel.
+
+        Args:
+            channel_id: Identity of the channel used by this operation.
+            name: Name to assign or resolve in this operation.
+            avatar: Replacement avatar; on an edit, omission preserves it and None clears it.
+
+        Returns:
+            The result of this operation.
+        """
         assert self._http is not None
         data = await self._http.create_webhook(channel_id, name=name, avatar=avatar)
         return Webhook.from_data(data, self._http)
@@ -657,25 +1012,63 @@ class Client:
         """Join a voice channel and return a connected VoiceClient.
 
         Requires pip install fluxer.py[voice].
+
+        Args:
+            guild_id: Identity of the guild used by this operation.
+            channel_id: Identity of the channel used by this operation.
+            self_mute: Whether this voice connection starts with the local microphone muted.
+            self_deaf: Whether this voice connection starts locally deafened.
+
+        Returns:
+            The result of this operation.
+
+        Note:
+            Requires the `voice` extra: `pip install fluxer.py[voice]`.
         """
         from .voice import VoiceClient
 
         if self._gateway is None:
             raise RuntimeError("Cannot join voice before connecting")
 
+        if guild_id in self._pending_voice or (
+            guild_id in self._active_voice and self._active_voice[guild_id].is_connected
+        ):
+            raise RuntimeError(
+                "A voice connection is already pending or active for this guild"
+            )
         vc = VoiceClient(guild_id, channel_id, self._gateway)
+        mutation_id = uuid.uuid4().hex
         self._pending_voice[guild_id] = vc
-        await self._gateway.update_voice_state(
-            guild_id=str(guild_id),
-            channel_id=str(channel_id),
-            self_mute=self_mute,
-            self_deaf=self_deaf,
-        )
-        await vc._wait_until_connected()
-        return vc
+        self._voice_mutations[mutation_id] = vc
+        try:
+            await self._gateway.update_voice_state(
+                guild_id=str(guild_id),
+                channel_id=str(channel_id),
+                self_mute=self_mute,
+                self_deaf=self_deaf,
+                mutation_id=mutation_id,
+            )
+            await vc._wait_until_connected()
+        except BaseException:
+            await vc.disconnect()
+            raise
+        else:
+            self._active_voice[guild_id] = vc
+            return vc
+        finally:
+            self._pending_voice.pop(guild_id, None)
+            self._voice_mutations.pop(mutation_id, None)
 
     def get_voice_state(self, guild_id: int, user_id: int) -> VoiceState | None:
-        """Return the cached voice state for a user in a guild, or None."""
+        """Return the cached voice state for a user in a guild, or None.
+
+        Args:
+            guild_id: Identity of the guild used by this operation.
+            user_id: Identity of the user used by this operation.
+
+        Returns:
+            The requested voice state, or None when no matching value is available.
+        """
         guild_states = self._voice_states.get(int(guild_id), {})
         for (cached_user_id, _connection_id), state in guild_states.items():
             if cached_user_id == int(user_id):
@@ -683,11 +1076,25 @@ class Client:
         return None
 
     def get_guild_voice_states(self, guild_id: int) -> list[VoiceState]:
-        """Return all cached voice states for a guild."""
+        """Return all cached voice states for a guild.
+
+        Args:
+            guild_id: Identity of the guild used by this operation.
+
+        Returns:
+            The requested guild voice states.
+        """
         return list(self._voice_states.get(int(guild_id), {}).values())
 
     def get_channel_voice_states(self, channel_id: int | str) -> list[VoiceState]:
-        """Return all cached voice states for a voice channel."""
+        """Return all cached voice states for a voice channel.
+
+        Args:
+            channel_id: Identity of the channel used by this operation.
+
+        Returns:
+            The requested channel voice states.
+        """
         target_channel_id = int(channel_id)
         return [
             state
@@ -697,12 +1104,20 @@ class Client:
         ]
 
     def get_channel_voice_user_count(self, channel_id: int | str) -> int:
-        """Return the cached unique-user count for a voice channel."""
+        """Return the cached unique-user count for a voice channel.
+
+        Args:
+            channel_id: Identity of the channel used by this operation.
+
+        Returns:
+            The requested channel voice user count.
+        """
         return len(
             {state.user_id for state in self.get_channel_voice_states(channel_id)}
         )
 
     def _voice_state_key(self, voice_state: VoiceState) -> tuple[int, str | None]:
+        assert voice_state.user_id is not None
         return (voice_state.user_id, voice_state.connection_id)
 
     def _seed_guild_voice_states(
@@ -715,14 +1130,34 @@ class Client:
             }
             self._store_voice_state(payload)
 
+    def _clear_voice_tombstones(self, guild_id: int) -> None:
+        for key in list(self._voice_tombstones):
+            if key[0] == guild_id:
+                self._voice_tombstones.pop(key)
+
     def _store_voice_state(self, data: dict[str, Any]) -> VoiceState:
         voice_state = VoiceState.from_data(data, self._http)
-        if voice_state.guild_id is not None:
+        if voice_state.guild_id is not None and voice_state.user_id is not None:
             guild_states = self._voice_states.setdefault(voice_state.guild_id, {})
             key = self._voice_state_key(voice_state)
+            tombstone_key = (voice_state.guild_id, *key)
+            previous = guild_states.get(key) or self._voice_tombstones.get(
+                tombstone_key
+            )
+            if (
+                previous is not None
+                and previous.version is not None
+                and voice_state.version is not None
+                and voice_state.version < previous.version
+            ):
+                return previous
             if voice_state.channel_id is None:
                 guild_states.pop(key, None)
+                self._voice_tombstones[tombstone_key] = voice_state
+                if len(self._voice_tombstones) > 2048:
+                    self._voice_tombstones.pop(next(iter(self._voice_tombstones)))
             else:
+                self._voice_tombstones.pop(tombstone_key, None)
                 guild_states[key] = voice_state
         return voice_state
 
@@ -744,6 +1179,9 @@ class Client:
             Forbidden: You don't have permission to add reactions
             NotFound: The message doesn't exist
             HTTPException: Adding the reaction failed
+
+        Returns:
+            None.
         """
         assert self._http is not None
         await self._http.add_reaction(channel_id, message_id, emoji)
@@ -767,6 +1205,9 @@ class Client:
             Forbidden: You don't have permission to remove this reaction
             NotFound: The message or reaction doesn't exist
             HTTPException: Removing the reaction failed
+
+        Returns:
+            None.
         """
         assert self._http is not None
         await self._http.delete_reaction(channel_id, message_id, emoji, user_id)
@@ -784,6 +1225,9 @@ class Client:
             Forbidden: You don't have permission to clear reactions
             NotFound: The message doesn't exist
             HTTPException: Clearing reactions failed
+
+        Returns:
+            None.
         """
         assert self._http is not None
         await self._http.delete_all_reactions(channel_id, message_id)
@@ -802,6 +1246,9 @@ class Client:
             Forbidden: You don't have permission to clear reactions
             NotFound: The message doesn't exist
             HTTPException: Clearing reactions failed
+
+        Returns:
+            None.
         """
         assert self._http is not None
         await self._http.delete_all_reactions_for_emoji(channel_id, message_id, emoji)
@@ -815,11 +1262,21 @@ class Client:
         self,
         *,
         status: str = "online",
-        activity: BaseActivity | dict[str, Any] | str | None = None,
+        activity: BaseActivity | dict[str, Any] | str | None | UnsetType = UNSET,
         afk: bool = False,
         since: float | None = None,
     ) -> None:
-        """Update this client's gateway presence."""
+        """Update this client's gateway presence.
+
+        Args:
+            status: Presence status accepted by the Fluxer Gateway.
+            activity: Custom status text, CustomActivity, or a custom-status mapping; None clears it.
+            afk: Whether this session is away from the keyboard.
+            since: Deprecated compatibility timestamp ignored by Fluxer presence updates.
+
+        Returns:
+            None.
+        """
         await self._require_gateway().update_presence(
             status=status,
             activity=activity,
@@ -837,7 +1294,19 @@ class Client:
         user_ids: list[int | str] | None = None,
         nonce: str | None = None,
     ) -> None:
-        """Request guild members through the Fluxer Gateway."""
+        """Request guild members through the Fluxer Gateway.
+
+        Args:
+            guild_id: Identity of the guild used by this operation.
+            query: Search text used to select matching members or commands.
+            limit: Maximum entries in the requested page; the route's documented bounds apply.
+            presences: Whether the member request asks for presence information.
+            user_ids: IDs of the user resources selected by this operation.
+            nonce: Caller-selected correlation value echoed by the operation when supported.
+
+        Returns:
+            None.
+        """
         await self._require_gateway().request_guild_members(
             guild_id=guild_id,
             query=query,
@@ -853,26 +1322,60 @@ class Client:
         *,
         ranges: list[list[int]],
         channels: dict[str, Any] | None = None,
+        channel_id: int | str | None = None,
     ) -> None:
-        """Request a lazy member-list range through the Fluxer Gateway."""
+        """Request a lazy member-list range through the Fluxer Gateway.
+
+        Args:
+            guild_id: Identity of the guild used by this operation.
+            ranges: Inclusive member-list windows, each containing at most 100 positions.
+            channels: Explicit per-channel ranges, or one channel from which to infer the range target.
+            channel_id: Concrete channel receiving ranges when no mapping is supplied.
+
+        Returns:
+            None.
+        """
         await self._require_gateway().request_lazy_members(
             guild_id=guild_id,
             ranges=ranges,
             channels=channels,
+            **({"channel_id": channel_id} if channel_id is not None else {}),
         )
 
     async def request_guild_counts(self, guild_ids: list[int | str]) -> None:
-        """Request member/guild statistics through the Fluxer Gateway."""
+        """Request member/guild statistics through the Fluxer Gateway.
+
+        Args:
+            guild_ids: IDs of the guild resources selected by this operation.
+
+        Returns:
+            None.
+        """
         await self._require_gateway().request_guild_counts(guild_ids)
 
-    async def request_channel_member_counts(self, channel_ids: list[int | str]) -> None:
-        """Request channel member metrics through the Fluxer Gateway."""
-        await self._require_gateway().request_channel_member_counts(channel_ids)
+    async def request_channel_member_counts(
+        self, channel_ids: list[int | str], *, guild_id: int | str
+    ) -> None:
+        """Request channel member metrics through the Fluxer Gateway.
+
+        Args:
+            channel_ids: IDs of the channel resources selected by this operation.
+            guild_id: Identity of the guild used by this operation.
+
+        Returns:
+            None.
+        """
+        await self._require_gateway().request_channel_member_counts(
+            channel_ids, guild_id=guild_id
+        )
 
     async def setup_hook(self) -> None:
         """Called before connecting to the gateway.
 
         Override this to perform setup tasks before the client starts receiving events.
+
+        Returns:
+            None.
         """
 
     # =========================================================================
@@ -883,22 +1386,23 @@ class Client:
         """Connect to Fluxer and start receiving events (async version).
 
         Use this if you're managing your own event loop.
+
+        Args:
+            token: Caller-supplied credential or webhook capability; keep this value secret.
+
+        Returns:
+            None.
         """
         self._closed = False
         self._ready.clear()
 
-        # Create HTTP client with custom API URL if provided
-        if self.api_url:
-            self._http = HTTPClient(
-                token,
-                api_url=self.api_url,
-                max_retries=self._max_retries,
-                retry_forever=self._retry_forever,
-            )
-        else:
-            self._http = HTTPClient(
-                token, max_retries=self._max_retries, retry_forever=self._retry_forever
-            )
+        self._http = HTTPClient(
+            token,
+            api_url=self.api_url,
+            instance_url=self.instance_url,
+            max_retries=self._max_retries,
+            retry_forever=self._retry_forever,
+        )
 
         self._state.http = self._http
 
@@ -909,21 +1413,37 @@ class Client:
             dispatch=self._dispatch,
         )
 
-        await self.setup_hook()
-
         try:
+            await self._http._ensure_session()
+            await self.setup_hook()
             await self._gateway.connect()
         finally:
             await self.close()
 
     async def close(self) -> None:
-        """Disconnect from the gateway and clean up resources."""
+        """Disconnect from the gateway and clean up resources.
+
+        Returns:
+            None.
+        """
         self._closed = True
         self._ready.clear()
         for waiters in self._waiters.values():
             for future, _check in waiters:
                 future.cancel()
         self._waiters.clear()
+        handlers = [
+            task for task in self._handler_tasks if task is not asyncio.current_task()
+        ]
+        for task in handlers:
+            task.cancel()
+        await asyncio.gather(*handlers, return_exceptions=True)
+        for vc in set(self._pending_voice.values()) | set(self._active_voice.values()):
+            vc._reject_placement("Client closed during voice placement")
+            await vc.disconnect()
+        self._pending_voice.clear()
+        self._active_voice.clear()
+        self._voice_mutations.clear()
         if self._gateway:
             await self._gateway.close()
         if self._http:
@@ -936,6 +1456,12 @@ class Client:
             bot.run("your_token_here")
 
         It creates an event loop, calls start(), and handles cleanup.
+
+        Args:
+            token: Caller-supplied credential or webhook capability; keep this value secret.
+
+        Returns:
+            None.
         """
 
         async def _runner() -> None:
@@ -956,7 +1482,7 @@ class Client:
 BotT = TypeVar("BotT", bound="Bot", covariant=True)
 Prefix = str | Iterable[str]
 PrefixCallable = Callable[[BotT, Message], Prefix | Awaitable[Prefix]]
-PrefixType = Prefix | PrefixCallable
+PrefixType = Prefix | PrefixCallable["Bot"]
 
 
 class Bot(Client):
@@ -965,31 +1491,47 @@ class Bot(Client):
     Adds prefix command support, cog support, and other bot-specific features.
     This is the recommended class for most bot use cases.
 
-    Args:
+    Attributes:
+        intents: Deprecated compatibility mask; it does not filter Fluxer Gateway events.
+        api_url: Already-versioned REST override, or the base resolved after discovery.
+        instance_url: Origin used for unauthenticated instance discovery.
+        user: The bot user, available after the READY event.
+        guilds: List of guilds the bot is in (populated from READY + GUILD_CREATE).
+        loop: Return the active asyncio event loop.
+        cached_messages: Messages currently retained by the in-memory message cache.
         command_prefix: Prefix for text commands (default: "!")
-        intents: Gateway intents to request (default: Intents.default())
-        api_url: Base URL for the Fluxer API (default: https://api.fluxer.app/v1)
-                 Use this to connect to self-hosted Fluxer instances
-        max_retries: Maximum number of retries for HTTP requests (default: 4)
-        retry_forever: Whether to retry HTTP requests indefinitely (default: False)
+        cogs: Get all loaded cogs.
+        extensions: Get all loaded extensions.
     """
 
     def __init__(
         self,
         *,
         command_prefix: PrefixType = "!",
-        intents: Intents = Intents.default(),
+        intents: Intents | None = None,
         api_url: str | None = None,
+        instance_url: str | None = None,
         max_retries: int = 4,
         retry_forever: bool = False,
     ) -> None:
+        """Initialize the bot with the supplied configuration.
+
+        Args:
+            command_prefix: Command prefix used by this operation.
+            intents: Deprecated compatibility mask; Fluxer does not use intents to filter events.
+            api_url: Already-versioned REST service override, including any instance path prefix.
+            instance_url: Origin publishing the unauthenticated Fluxer discovery document.
+            max_retries: Maximum retries after the initial request; zero disables retries.
+            retry_forever: Whether replayable transient failures may retry without a ceiling.
+        """
         super().__init__(
             intents=intents,
             api_url=api_url,
+            instance_url=instance_url,
             max_retries=max_retries,
             retry_forever=retry_forever,
         )
-        self.command_prefix = command_prefix
+        self.command_prefix: PrefixType = command_prefix
         self._commands: dict[str, EventHandler] = {}
         self._cogs: dict[str, Any] = {}  # Store loaded cogs
         self._extensions: dict[str, Any] = {}  # Store loaded extensions
@@ -1012,6 +1554,12 @@ class Bot(Client):
             @bot.command(name="hello")
             async def greet(ctx):
                 await ctx.reply(f"Hello, {ctx.author}!")
+
+        Args:
+            name: Name to assign or resolve in this operation.
+
+        Returns:
+            The configured decorator or callback wrapper.
         """
 
         def decorator(func: EventHandler) -> EventHandler:
@@ -1025,6 +1573,14 @@ class Bot(Client):
         return decorator
 
     async def get_prefix(self, message: Message) -> Prefix:
+        """Resolve the command prefixes applicable to this message.
+
+        Args:
+            message: Message supplying content and channel/guild context.
+
+        Returns:
+            The requested prefix.
+        """
         if callable(self.command_prefix):
             prefix = self.command_prefix(self, message)
             if inspect.isawaitable(prefix):
@@ -1198,6 +1754,9 @@ class Bot(Client):
 
             bot = Bot()
             await bot.add_cog(MyCog(bot))
+
+        Returns:
+            None.
         """
         cog_name = cog.__class__.__name__
 
@@ -1242,6 +1801,9 @@ class Bot(Client):
 
         Example:
             await bot.remove_cog("MyCog")
+
+        Returns:
+            None.
         """
         if cog_name not in self._cogs:
             raise ValueError(f"Cog '{cog_name}' is not loaded")
@@ -1290,6 +1852,9 @@ class Bot(Client):
 
             # Add new cog
             await bot.add_cog(my_cogs.MyCog(bot))
+
+        Returns:
+            None.
         """
         if cog_name not in self._cogs:
             raise ValueError(f"Cog '{cog_name}' is not loaded")
@@ -1311,7 +1876,11 @@ class Bot(Client):
 
     @property
     def cogs(self) -> dict[str, Any]:
-        """Get all loaded cogs."""
+        """Get all loaded cogs.
+
+        Returns:
+            The result of this operation.
+        """
         return self._cogs.copy()
 
     # =========================================================================
@@ -1329,7 +1898,7 @@ class Bot(Client):
 
         Example:
             # In cogs/moderation.py:
-            from fluxer import Cog
+            from .cog import Cog
 
             class ModerationCog(Cog):
                 @Cog.command()
@@ -1341,6 +1910,9 @@ class Bot(Client):
 
             # In your main bot file:
             await bot.load_extension("cogs.moderation")
+
+        Returns:
+            None.
         """
         if name in self._extensions:
             raise ValueError(f"Extension '{name}' is already loaded")
@@ -1381,6 +1953,9 @@ class Bot(Client):
 
         Example:
             await bot.unload_extension("cogs.moderation")
+
+        Returns:
+            None.
         """
         if name not in self._extensions:
             raise ValueError(f"Extension '{name}' is not loaded")
@@ -1416,6 +1991,9 @@ class Bot(Client):
 
         Example:
             await bot.reload_extension("cogs.moderation")
+
+        Returns:
+            None.
         """
         if name not in self._extensions:
             raise ValueError(f"Extension '{name}' is not loaded")
@@ -1427,7 +2005,11 @@ class Bot(Client):
 
     @property
     def extensions(self) -> dict[str, Any]:
-        """Get all loaded extensions."""
+        """Get all loaded extensions.
+
+        Returns:
+            The result of this operation.
+        """
         return self._extensions.copy()
 
 
@@ -1440,6 +2022,10 @@ def when_mentioned(bot: Bot, message: Message, /) -> list[str]:
 
     Returns:
         A list containing the bot's mention string.
+
+    Args:
+        bot: Client owning this command, cog, or context.
+        message: Message supplying content and channel/guild context.
     """
     return [f"<@{bot.user.id}> "]  # type: ignore
 
@@ -1463,3 +2049,6 @@ def when_mentioned_or(*prefixes: str) -> Callable[[Bot, Message], list[str]]:
         return when_mentioned(bot, message) + list(prefixes)
 
     return inner
+
+
+__all__ = ("Client", "Bot", "when_mentioned", "when_mentioned_or")

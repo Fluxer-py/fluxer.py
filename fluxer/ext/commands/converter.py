@@ -1,3 +1,8 @@
+"""Converter helpers and public types for fluxer.py.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 import inspect
@@ -41,12 +46,42 @@ def _parse_snowflake(argument: str) -> int:
 
 
 class Converter:
+    """Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> Any:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         return argument
 
 
 class IDConverter(Converter):
+    """IDConverter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> Any:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         try:
             return _parse_snowflake(argument)
         except ValueError as exc:
@@ -54,7 +89,22 @@ class IDConverter(Converter):
 
 
 class UserConverter(IDConverter):
+    """User Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> User:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         user_id = await super().convert(ctx, argument)
         try:
             return await ctx.bot.fetch_user(str(user_id))
@@ -63,7 +113,22 @@ class UserConverter(IDConverter):
 
 
 class MemberConverter(IDConverter):
+    """Member Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> GuildMember:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         if ctx.guild is None:
             raise BadArgument("Member conversion requires a guild")
         user_id = await super().convert(ctx, argument)
@@ -74,7 +139,22 @@ class MemberConverter(IDConverter):
 
 
 class GuildConverter(IDConverter):
+    """Guild Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> Guild:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         guild_id = await super().convert(ctx, argument)
         cached = ctx.bot.get_guild(guild_id)
         try:
@@ -84,7 +164,22 @@ class GuildConverter(IDConverter):
 
 
 class TextChannelConverter(IDConverter):
+    """Text Channel Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> Channel:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         channel_id = await super().convert(ctx, argument)
         try:
             return await ctx.bot.fetch_channel(str(channel_id))
@@ -97,7 +192,22 @@ CategoryChannelConverter = TextChannelConverter
 
 
 class RoleConverter(IDConverter):
+    """Role Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> Role:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         role_id = await super().convert(ctx, argument)
         if ctx.guild is None:
             raise BadArgument("Role conversion requires a guild")
@@ -108,7 +218,22 @@ class RoleConverter(IDConverter):
 
 
 class MessageConverter(Converter):
+    """Message Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> Message:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         try:
             message_id = int(argument)
         except ValueError as exc:
@@ -120,7 +245,22 @@ class MessageConverter(Converter):
 
 
 class ColourConverter(Converter):
+    """Colour Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> Colour:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         try:
             return Colour.from_str(argument)
         except ValueError as exc:
@@ -131,7 +271,22 @@ ColorConverter = ColourConverter
 
 
 class EmojiConverter(IDConverter):
+    """Emoji Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> Emoji:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         emoji_id = await super().convert(ctx, argument)
         if ctx.guild is None:
             raise EmojiNotFound(argument)
@@ -142,7 +297,22 @@ class EmojiConverter(IDConverter):
 
 
 class PartialEmojiConverter(Converter):
+    """Partial Emoji Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> PartialEmoji:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         from ...models.reaction import PartialEmoji
 
         if argument.startswith("<") and argument.endswith(">") and ":" in argument:
@@ -154,12 +324,42 @@ class PartialEmojiConverter(Converter):
 
 
 class GameConverter(Converter):
+    """Game Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> str:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         return argument
 
 
 class InviteConverter(Converter):
+    """Invite Converter data and behaviour.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
     async def convert(self, ctx: Any, argument: str) -> Any:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         from ...invite import Invite
 
         if ctx.bot._http is None:
@@ -169,13 +369,35 @@ class InviteConverter(Converter):
 
 
 class clean_content(Converter):
+    """clean content data and behaviour.
+
+    Attributes:
+        escape_markdown: Escape markdown used by this operation.
+        remove_markdown: Remove markdown used by this operation.
+    """
+
     def __init__(
         self, *, escape_markdown: bool = False, remove_markdown: bool = False
     ) -> None:
-        self.escape_markdown = escape_markdown
-        self.remove_markdown = remove_markdown
+        """Initialize the clean content with the supplied configuration.
+
+        Args:
+            escape_markdown: Escape markdown used by this operation.
+            remove_markdown: Remove markdown used by this operation.
+        """
+        self.escape_markdown: bool = escape_markdown
+        self.remove_markdown: bool = remove_markdown
 
     async def convert(self, ctx: Any, argument: str) -> str:
+        """Resolve command argument text or raise the converter's input error.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The result of this operation.
+        """
         from ... import utils
 
         if self.remove_markdown:
@@ -187,15 +409,39 @@ class clean_content(Converter):
 
 class _Greedy:
     def __init__(self, converter: Any) -> None:
-        self.converter = converter
+        self.converter: Any = converter
 
 
 class Greedy:
+    """Greedy data and behaviour.
+
+    Attributes:
+        __class_getitem__: Bind the converter used for repeated positional arguments.
+    """
+
     def __class_getitem__(cls, converter: Any) -> _Greedy:
+        """Class getitem.
+
+        Args:
+            converter: Converter applied to the command argument.
+
+        Returns:
+            The result of this operation.
+        """
         return _Greedy(converter)
 
 
 async def run_converter(ctx: Any, converter: Any, argument: str) -> Any:
+    """Apply the selected converter to one command argument.
+
+    Args:
+        ctx: Command invocation context, including the author, channel, and guild.
+        converter: Converter applied to the command argument.
+        argument: Unconverted command argument text.
+
+    Returns:
+        The result of this operation.
+    """
     if isinstance(converter, str):
         converter = {
             "str": str,
@@ -287,3 +533,23 @@ async def run_converter(ctx: Any, converter: Any, argument: str) -> Any:
         return converter(argument)
     except Exception as exc:
         raise BadArgument(str(exc)) from exc
+
+
+__all__ = (
+    "Converter",
+    "IDConverter",
+    "UserConverter",
+    "MemberConverter",
+    "GuildConverter",
+    "TextChannelConverter",
+    "RoleConverter",
+    "MessageConverter",
+    "ColourConverter",
+    "EmojiConverter",
+    "PartialEmojiConverter",
+    "GameConverter",
+    "InviteConverter",
+    "clean_content",
+    "Greedy",
+    "run_converter",
+)

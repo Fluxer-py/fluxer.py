@@ -1,3 +1,8 @@
+"""Embed helpers and public types for fluxer.py.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,6 +18,27 @@ class Embed:
         embed.add_field(name="Field 1", value="Value 1")
         embed.set_footer(text="Footer text")
         await channel.send(embed=embed)
+
+    Attributes:
+        title: Embed title.
+        description: Embed description.
+        url: Embed destination URL.
+        color: Embed colour.
+        timestamp: Embed timestamp.
+        footer: Embed footer.
+        image: Main image.
+        thumbnail: Thumbnail image.
+        author: Embed author.
+        fields: Embed fields.
+        type: Embed type.
+        provider: External provider.
+        video: Video media.
+        audio: Audio media.
+        nsfw: Whether the embed contains explicit media.
+        html: Sanitised oEmbed markup for a trusted specialised renderer.
+        html_width: Preferred pixel width of the sanitised oEmbed markup.
+        html_height: Preferred pixel height of the sanitised oEmbed markup.
+        children: At most one nested unfurler-generated embed, which itself has no `children` field.
     """
 
     title: str | None = None
@@ -26,23 +52,68 @@ class Embed:
     author: dict[str, Any] | None = None
     fields: list[dict[str, Any]] = field(default_factory=list)
 
+    type: str | None = None
+    provider: dict[str, Any] | None = None
+    video: dict[str, Any] | None = None
+    audio: dict[str, Any] | None = None
+    nsfw: bool | None = None
+    html: str | None = None
+    html_width: int | None = None
+    html_height: int | None = None
+    children: list[dict[str, Any]] | None = None
+
     def set_footer(self, *, text: str, icon_url: str | None = None) -> Embed:
+        """Replace embed footer text and its optional icon.
+
+        Args:
+            text: Text to format, parse, or display.
+            icon_url: Icon url used by this operation.
+
+        Returns:
+            This instance, allowing chained calls.
+        """
         self.footer = {"text": text}
         if icon_url:
             self.footer["icon_url"] = icon_url
         return self
 
     def set_image(self, *, url: str) -> Embed:
+        """Set the main image URL on this rich embed.
+
+        Args:
+            url: Absolute destination or resource URL.
+
+        Returns:
+            This instance, allowing chained calls.
+        """
         self.image = {"url": url}
         return self
 
     def set_thumbnail(self, *, url: str) -> Embed:
+        """Set the thumbnail URL on this rich embed.
+
+        Args:
+            url: Absolute destination or resource URL.
+
+        Returns:
+            This instance, allowing chained calls.
+        """
         self.thumbnail = {"url": url}
         return self
 
     def set_author(
         self, *, name: str, url: str | None = None, icon_url: str | None = None
     ) -> Embed:
+        """Replace embed author metadata.
+
+        Args:
+            name: Name to assign or resolve in this operation.
+            url: Absolute destination or resource URL.
+            icon_url: Icon url used by this operation.
+
+        Returns:
+            This instance, allowing chained calls.
+        """
         self.author = {"name": name}
         if url:
             self.author["url"] = url
@@ -51,11 +122,25 @@ class Embed:
         return self
 
     def add_field(self, *, name: str, value: str, inline: bool = False) -> Embed:
+        """Append a named field to this embed in display order.
+
+        Args:
+            name: Name to assign or resolve in this operation.
+            value: Value to convert, assign, or compare.
+            inline: Inline used by this operation.
+
+        Returns:
+            This instance, allowing chained calls.
+        """
         self.fields.append({"name": name, "value": value, "inline": inline})
         return self
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to a dict suitable for the API."""
+        """Serialize to a dict suitable for the API.
+
+        Returns:
+            The serialized representation with supported fields preserved.
+        """
         d: dict[str, Any] = {}
         if self.title is not None:
             d["title"] = self.title
@@ -77,46 +162,65 @@ class Embed:
             d["author"] = self.author
         if self.fields:
             d["fields"] = self.fields
+        for key in (
+            "type",
+            "provider",
+            "video",
+            "audio",
+            "nsfw",
+            "html",
+            "html_width",
+            "html_height",
+            "children",
+        ):
+            value = getattr(self, key)
+            if value is not None:
+                d[key] = value
         return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Embed:
-        embed = cls(
-            title=data.get("title"),
-            description=data.get("description"),
-            url=data.get("url"),
-            color=data.get("color"),
-            timestamp=data.get("timestamp"),
+        """Build a Embed from its decoded payload.
+
+        Args:
+            data: Decoded payload to parse; omitted fields retain the parser's documented defaults.
+
+        Returns:
+            A parsed Embed instance.
+        """
+        return cls(
+            **{
+                key: value
+                for key, value in data.items()
+                if key in cls.__dataclass_fields__
+            }
         )
 
-        author: dict[str, str] | None = data.get("author")
-        if author is not None:
-            embed.set_author(
-                name=author.get("name", ""),
-                url=author.get("url"),
-                icon_url=author.get("icon_url"),
-            )
+    def _to_request_dict(self) -> dict[str, Any]:
+        data = self.to_dict()
+        for key in (
+            "type",
+            "provider",
+            "video",
+            "audio",
+            "nsfw",
+            "html",
+            "html_width",
+            "html_height",
+            "children",
+        ):
+            data.pop(key, None)
+        for key, allowed in {
+            "author": {"name", "url", "icon_url"},
+            "footer": {"text", "icon_url"},
+            "image": {"url"},
+            "thumbnail": {"url"},
+        }.items():
+            if key in data:
+                data[key] = {
+                    name: value for name, value in data[key].items() if name in allowed
+                }
+        return data
 
-        fields: list[dict[str, Any]] = data.get("fields", [])
-        for field_data in fields:
-            embed.add_field(
-                name=field_data.get("name", ""),
-                value=field_data.get("value", ""),
-                inline=field_data.get("inline", False),
-            )
 
-        image: dict[str, Any] | None = data.get("image")
-        if image is not None and "url" in image:
-            embed.set_image(url=image["url"])
-
-        thumbnail: dict[str, Any] | None = data.get("thumbnail")
-        if thumbnail is not None and "url" in thumbnail:
-            embed.set_thumbnail(url=thumbnail["url"])
-
-        footer: dict[str, Any] | None = data.get("footer")
-        if footer is not None:
-            embed.set_footer(
-                text=footer.get("text", ""), icon_url=footer.get("icon_url")
-            )
-
-        return embed
+__all__ = ("Embed",)

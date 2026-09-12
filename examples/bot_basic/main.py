@@ -16,6 +16,11 @@ import asyncio
 
 
 def get_log_level() -> int:
+    """Read the logging level from LOG_LEVEL.
+
+    Returns:
+        The configured level, falling back to INFO.
+    """
     log_level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
     return getattr(logging, log_level, logging.INFO)
 
@@ -24,14 +29,17 @@ def get_log_level() -> int:
 logging.basicConfig(level=get_log_level())
 logger = logging.getLogger(__name__)
 
-bot = fluxer.Bot(
-    command_prefix=os.getenv("PREFIX", "!"), intents=fluxer.Intents.default()
-)
+bot = fluxer.Bot(command_prefix=os.getenv("PREFIX", "!"))
 
 
 # Event listening through the bot object, you can listen to other events like on_message, on_member_join, etc.
 @bot.event
-async def on_ready():
+async def on_ready() -> None:
+    """Log the authenticated account when ready.
+
+    Returns:
+        None.
+    """
     if bot.user is not None:
         logger.info(f"Logged in as {bot.user}")
     else:
@@ -40,14 +48,23 @@ async def on_ready():
 
 # You can define commands directly in here, but it's not really tidy this way, consider using cogs
 @bot.command()
-async def ping(ctx: fluxer.Message):
-    """Replies with Pong!"""
+async def ping(ctx: fluxer.Message) -> None:
+    """Reply with Pong!
+
+    Args:
+        ctx: Message that invoked the command.
+    """
     logger.info(f"Received ping command from {ctx.author.display_name}")
     await ctx.reply("Pong!")
 
 
 # This will automatically load all your cogs found under the `cogs` directory, it has to be executed before running the bot, otherwise the cogs won't be loaded and their commands/listeners won't work.
-async def load_extensions():
+async def load_extensions() -> None:
+    """Load Python extensions from the local cogs directory.
+
+    Returns:
+        None.
+    """
     for filename in os.listdir("./cogs"):
         if filename.endswith(".py"):
             await bot.load_extension(f"cogs.{filename[:-3]}")

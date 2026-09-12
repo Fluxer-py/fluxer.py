@@ -1,3 +1,8 @@
+"""Core helpers and public types for fluxer.py.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -29,10 +34,48 @@ async def _maybe_await(value: Any) -> Any:
 
 
 class Command:
+    """Async command callback, argument parsing, and invocation checks.
+
+    Attributes:
+        name: Name.
+        aliases: Aliases.
+        help: Help.
+        brief: Brief.
+        description: Description.
+        enabled: Enabled.
+        hidden: Hidden.
+        callback: Async callable invoked by this command or task.
+        checks: Alternative conditions evaluated by the check decorator.
+        cog: Cog containing related commands and listeners.
+        parent: Owning group for this command.
+        error_handler: Error handler used by this operation.
+        before_invoke_hook: Before invoke hook used by this operation.
+        after_invoke_hook: After invoke hook used by this operation.
+        qualified_name: Return the name including the owning command groups.
+        signature: Return the user-facing command argument signature.
+        params: Return the command callback's inspected parameters.
+        clean_params: Return callback parameters excluding context and bound-instance arguments.
+        short_doc: Return the brief description or first line of command help.
+    """
+
+    name: str
+    aliases: list[str]
+    help: str
+    brief: str | None
+    description: str
+    enabled: bool
+    hidden: bool
+
     def __init__(self, func: Callable[..., Awaitable[Any]], **attrs: Any) -> None:
+        """Initialize the command with the supplied configuration.
+
+        Args:
+            func: Callable registered or applied by this helper.
+            **attrs: Attrs used by this operation.
+        """
         if not inspect.iscoroutinefunction(func):
             raise TypeError("Commands must be coroutine functions")
-        self.callback = func
+        self.callback: Callable[..., Awaitable[Any]] = func
         self.name = attrs.get("name") or func.__name__
         self.aliases = list(attrs.get("aliases", ()))
         self.help = attrs.get("help") or inspect.getdoc(func) or ""
@@ -55,10 +98,20 @@ class Command:
 
     @property
     def qualified_name(self) -> str:
+        """Return the name including the owning command groups.
+
+        Returns:
+            The result of this operation.
+        """
         return f"{self.parent.qualified_name} {self.name}" if self.parent else self.name
 
     @property
     def signature(self) -> str:
+        """Return the user-facing command argument signature.
+
+        Returns:
+            The result of this operation.
+        """
         params = list(self.clean_params.values())
         return " ".join(
             f"<{p.name}>" if p.default is inspect.Parameter.empty else f"[{p.name}]"
@@ -67,10 +120,20 @@ class Command:
 
     @property
     def params(self) -> OrderedDict[str, inspect.Parameter]:
+        """Return the command callback's inspected parameters.
+
+        Returns:
+            The result of this operation.
+        """
         return OrderedDict(inspect.signature(self.callback).parameters)
 
     @property
     def clean_params(self) -> OrderedDict[str, inspect.Parameter]:
+        """Return callback parameters excluding context and bound-instance arguments.
+
+        Returns:
+            The result of this operation.
+        """
         params = list(self.params.values())
         if self.cog is not None and params:
             params = params[1:]
@@ -80,11 +143,21 @@ class Command:
 
     @property
     def short_doc(self) -> str:
+        """Return the brief description or first line of command help.
+
+        Returns:
+            The result of this operation.
+        """
         if self.brief is not None:
             return self.brief
         return self.help.splitlines()[0] if self.help else ""
 
     def copy(self) -> "Command":
+        """Copy.
+
+        Returns:
+            The result of this operation.
+        """
         copied = type(self)(
             self.callback,
             name=self.name,
@@ -103,9 +176,25 @@ class Command:
         return copied
 
     def add_check(self, func: Check) -> None:
+        """Add check.
+
+        Args:
+            func: Callable registered or applied by this helper.
+
+        Returns:
+            None.
+        """
         self.checks.append(func)
 
     def remove_check(self, func: Check) -> None:
+        """Remove check.
+
+        Args:
+            func: Callable registered or applied by this helper.
+
+        Returns:
+            None.
+        """
         try:
             self.checks.remove(func)
         except ValueError:
@@ -114,28 +203,68 @@ class Command:
     def error(
         self, coro: Callable[..., Awaitable[Any]]
     ) -> Callable[..., Awaitable[Any]]:
+        """Error.
+
+        Args:
+            coro: Coroutine function invoked by the task or command wrapper.
+
+        Returns:
+            The configured decorator or callback wrapper.
+        """
         self.error_handler = coro
         return coro
 
     def before_invoke(
         self, coro: Callable[..., Awaitable[Any]]
     ) -> Callable[..., Awaitable[Any]]:
+        """Register the coroutine run immediately before command execution.
+
+        Args:
+            coro: Coroutine function invoked by the task or command wrapper.
+
+        Returns:
+            The configured decorator or callback wrapper.
+        """
         self.before_invoke_hook = coro
         return coro
 
     def after_invoke(
         self, coro: Callable[..., Awaitable[Any]]
     ) -> Callable[..., Awaitable[Any]]:
+        """Register the coroutine run after command execution.
+
+        Args:
+            coro: Coroutine function invoked by the task or command wrapper.
+
+        Returns:
+            The configured decorator or callback wrapper.
+        """
         self.after_invoke_hook = coro
         return coro
 
     async def can_run(self, ctx: Context) -> bool:
+        """Evaluate the configured checks for this invocation.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+
+        Returns:
+            Whether the documented condition holds for the current state.
+        """
         for predicate in self.checks:
             if not await _maybe_await(predicate(ctx)):
                 raise CheckFailure("A command check failed")
         return True
 
     async def prepare(self, ctx: Context) -> None:
+        """Prepare arguments, checks, and cooldown state for command invocation.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+
+        Returns:
+            None.
+        """
         if not self.enabled:
             raise DisabledCommand(f"{self.qualified_name} is disabled")
         await self.can_run(ctx)
@@ -218,6 +347,14 @@ class Command:
         ctx.kwargs = call_kwargs
 
     async def invoke(self, ctx: Context) -> Any:
+        """Invoke the selected command with its parsed context.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+
+        Returns:
+            The result of this operation.
+        """
         ctx.command = self
         acquired = self._max_concurrency is not None
         try:
@@ -255,14 +392,39 @@ class Command:
 
 
 class GroupMixin:
+    """Registration and lookup shared by bot and group command containers.
+
+    Attributes:
+        all_commands: All commands used by this operation.
+        commands: Commands.
+    """
+
     def __init__(self) -> None:
+        """Initialize the group mixin with the supplied configuration.
+
+        Note:
+            Further behaviour is defined by the methods on this instance.
+        """
         self.all_commands: OrderedDict[str, Command] = OrderedDict()
 
     @property
     def commands(self) -> list[Command]:
+        """Commands.
+
+        Returns:
+            The result of this operation.
+        """
         return list(dict.fromkeys(self.all_commands.values()))
 
     def add_command(self, command: Command) -> None:
+        """Add command.
+
+        Args:
+            command: Command to resolve, invoke, or display.
+
+        Returns:
+            None.
+        """
         if isinstance(self, Group):
             command.parent = self
         self.all_commands[command.name] = command
@@ -270,6 +432,14 @@ class GroupMixin:
             self.all_commands[alias] = command
 
     def remove_command(self, name: str) -> Command | None:
+        """Remove command.
+
+        Args:
+            name: Name to assign or resolve in this operation.
+
+        Returns:
+            The result of this operation.
+        """
         command = self.all_commands.pop(name, None)
         if command:
             for alias in list(command.aliases):
@@ -277,6 +447,14 @@ class GroupMixin:
         return command
 
     def get_command(self, name: str) -> Command | None:
+        """Get command.
+
+        Args:
+            name: Name to assign or resolve in this operation.
+
+        Returns:
+            The requested command, or None when no matching value is available.
+        """
         current: Command | None = None
         mapping: GroupMixin = self
         for part in name.split():
@@ -288,6 +466,11 @@ class GroupMixin:
         return current
 
     def walk_commands(self) -> list[Command]:
+        """Walk commands.
+
+        Returns:
+            The result of this operation.
+        """
         out: list[Command] = []
         for command in self.commands:
             out.append(command)
@@ -298,6 +481,16 @@ class GroupMixin:
     def command(
         self, *args: Any, **kwargs: Any
     ) -> Callable[[Callable[..., Awaitable[Any]]], Command]:
+        """Command.
+
+        Args:
+            *args: Positional arguments forwarded to the wrapped callback.
+            **kwargs: Additional options forwarded to the underlying operation.
+
+        Returns:
+            The configured decorator or callback wrapper.
+        """
+
         def decorator(func: Callable[..., Awaitable[Any]]) -> Command:
             cmd = command(*args, **kwargs)(func)
             self.add_command(cmd)
@@ -308,6 +501,16 @@ class GroupMixin:
     def group(
         self, *args: Any, **kwargs: Any
     ) -> Callable[[Callable[..., Awaitable[Any]]], "Group"]:
+        """Group.
+
+        Args:
+            *args: Positional arguments forwarded to the wrapped callback.
+            **kwargs: Additional options forwarded to the underlying operation.
+
+        Returns:
+            The configured decorator or callback wrapper.
+        """
+
         def decorator(func: Callable[..., Awaitable[Any]]) -> Group:
             cmd = group(*args, **kwargs)(func)
             self.add_command(cmd)
@@ -317,12 +520,52 @@ class GroupMixin:
 
 
 class Group(GroupMixin, Command):
+    """Command that owns subcommands and their invocation policy.
+
+    Attributes:
+        all_commands: All commands used by this operation.
+        commands: Commands.
+        name: Name.
+        aliases: Aliases.
+        help: Help.
+        brief: Brief.
+        description: Description.
+        enabled: Enabled.
+        hidden: Hidden.
+        callback: Async callable invoked by this command or task.
+        checks: Alternative conditions evaluated by the check decorator.
+        cog: Cog containing related commands and listeners.
+        parent: Owning group for this command.
+        error_handler: Error handler used by this operation.
+        before_invoke_hook: Before invoke hook used by this operation.
+        after_invoke_hook: After invoke hook used by this operation.
+        qualified_name: Return the name including the owning command groups.
+        signature: Return the user-facing command argument signature.
+        params: Return the command callback's inspected parameters.
+        clean_params: Return callback parameters excluding context and bound-instance arguments.
+        short_doc: Return the brief description or first line of command help.
+        invoke_without_command: Invoke without command.
+    """
+
+    invoke_without_command: bool
+
     def __init__(self, func: Callable[..., Awaitable[Any]], **attrs: Any) -> None:
+        """Initialize the group with the supplied configuration.
+
+        Args:
+            func: Callable registered or applied by this helper.
+            **attrs: Attrs used by this operation.
+        """
         GroupMixin.__init__(self)
         Command.__init__(self, func, **attrs)
         self.invoke_without_command = attrs.get("invoke_without_command", False)
 
     def copy(self) -> "Group":
+        """Copy.
+
+        Returns:
+            The result of this operation.
+        """
         copied = type(self)(
             self.callback,
             name=self.name,
@@ -344,6 +587,14 @@ class Group(GroupMixin, Command):
         return copied
 
     async def invoke(self, ctx: Context) -> Any:
+        """Invoke the selected command with its parsed context.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+
+        Returns:
+            The result of this operation.
+        """
         if ctx.view is None:
             raise RuntimeError("Command context is missing a parser view")
         view = ctx.view
@@ -363,6 +614,17 @@ class Group(GroupMixin, Command):
 def command(
     name: str | None = None, cls: type[Command] | None = None, **attrs: Any
 ) -> Callable[[Callable[..., Awaitable[Any]]], Command]:
+    """Command.
+
+    Args:
+        cls: Command subclass to construct; omission uses Command.
+        name: Name to assign or resolve in this operation.
+        **attrs: Attrs used by this operation.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     def decorator(func: Callable[..., Awaitable[Any]]) -> Command:
         klass = cls or Command
         return klass(func, name=name, **attrs)
@@ -373,10 +635,28 @@ def command(
 def group(
     name: str | None = None, **attrs: Any
 ) -> Callable[[Callable[..., Awaitable[Any]]], Group]:
+    """Group.
+
+    Args:
+        name: Name to assign or resolve in this operation.
+        **attrs: Attrs used by this operation.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
     return command(name=name, cls=Group, **attrs)  # type: ignore[return-value]
 
 
 def check(predicate: Check) -> Callable[[Any], Any]:
+    """Register a condition that must pass before command invocation.
+
+    Args:
+        predicate: Condition used to accept an item or permit execution.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     def decorator(func: Any) -> Any:
         if isinstance(func, Command):
             func.checks.append(predicate)
@@ -390,6 +670,15 @@ def check(predicate: Check) -> Callable[[Any], Any]:
 
 
 def check_any(*checks: Check) -> Callable[[Any], Any]:
+    """Accept an invocation when at least one supplied check passes.
+
+    Args:
+        *checks: Alternative conditions evaluated by the check decorator.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     async def predicate(ctx: Context) -> bool:
         for pred in checks:
             try:
@@ -402,67 +691,106 @@ def check_any(*checks: Check) -> Callable[[Any], Any]:
     return check(predicate)
 
 
+async def _member_has_role(
+    ctx: Context, user_id: int, items: tuple[int | str, ...]
+) -> bool:
+    if ctx.message.guild_id is None:
+        return False
+    http = ctx.message._http
+    if http is None:
+        raise RuntimeError("HTTPClient is required to check roles")
+    member = await http.get_guild_member(ctx.message.guild_id, user_id)
+    role_ids = {int(role_id) for role_id in member.get("roles", [])}
+    roles = await http.get_guild_roles(ctx.message.guild_id)
+    names = {role["name"] for role in roles if int(role["id"]) in role_ids}
+    return any(
+        (isinstance(item, int) and item in role_ids)
+        or (
+            isinstance(item, str)
+            and (item in names or item in {str(r) for r in role_ids})
+        )
+        for item in items
+    )
+
+
 def has_role(item: int | str) -> Callable[[Any], Any]:
+    """Require a guild member to hold the specified role name or ID.
+
+    Args:
+        item: Role name or ID required by this check.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     async def predicate(ctx: Context) -> bool:
-        roles = getattr(ctx.author, "roles", [])
-        role_ids = [getattr(r, "id", r) for r in roles]
-        return item in role_ids or str(item) in {str(r) for r in role_ids}
+        return await _member_has_role(ctx, ctx.author.id, (item,))
 
     return check(predicate)
 
 
 def has_any_role(*items: int | str) -> Callable[[Any], Any]:
+    """Require a guild member to hold at least one specified role.
+
+    Args:
+        *items: Alternative role names or IDs accepted by this check.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     async def predicate(ctx: Context) -> bool:
-        roles = getattr(ctx.author, "roles", [])
-        role_ids = {str(getattr(r, "id", r)) for r in roles}
-        return any(str(item) in role_ids for item in items)
+        return await _member_has_role(ctx, ctx.author.id, items)
 
     return check(predicate)
 
 
 async def _check_fluxer_permissions(
-    ctx: Context, user_id: int, perms: dict[str, bool]
+    ctx: Context,
+    user_id: int,
+    perms: dict[str, bool],
+    *,
+    guild_only: bool = False,
 ) -> bool:
     from ...enums import Permissions
+    from ...permissions import _effective_permissions
     from .errors import MissingPermissions
 
+    unknown = set(name for name in perms if name.upper() not in Permissions.__members__)
+    if unknown:
+        raise ValueError(f"Unknown permissions: {', '.join(sorted(unknown))}")
     if ctx.message.guild_id is None:
         return False
-    if ctx.message._http is None:
+    http = ctx.message._http
+    if http is None:
         raise RuntimeError("HTTPClient is required to check permissions")
-
-    guild_data, member_data, roles_data = await asyncio.gather(
-        ctx.message._http.get_guild(ctx.message.guild_id),
-        ctx.message._http.get_guild_member(ctx.message.guild_id, user_id),
-        ctx.message._http.get_guild_roles(ctx.message.guild_id),
+    guild, member, roles = await asyncio.gather(
+        http.get_guild(ctx.message.guild_id),
+        http.get_guild_member(ctx.message.guild_id, user_id),
+        http.get_guild_roles(ctx.message.guild_id),
     )
-    if user_id == int(guild_data["owner_id"]):
-        return True
-
-    role_ids = {int(role_id) for role_id in member_data.get("roles", [])}
-    computed = Permissions(0)
-    for role in roles_data:
-        role_id = int(role["id"])
-        if role_id == ctx.message.guild_id or role_id in role_ids:
-            computed |= Permissions(int(role["permissions"]))
-    if computed & Permissions.ADMINISTRATOR:
-        return True
-
-    missing = []
-    for name, value in perms.items():
-        perm = getattr(Permissions, name.upper(), None)
-        if perm is None:
-            missing.append(name)
-            continue
-        has_perm = bool(computed & perm)
-        if has_perm != value:
-            missing.append(name)
+    channel = None if guild_only else await http.get_channel(ctx.message.channel_id)
+    computed = _effective_permissions(guild, member, roles, user_id, channel)
+    missing = [
+        name
+        for name, required in perms.items()
+        if bool(computed & Permissions[name.upper()]) != required
+    ]
     if missing:
         raise MissingPermissions(missing)
     return True
 
 
 def has_permissions(**perms: bool) -> Callable[[Any], Any]:
+    """Check the caller's effective permissions after channel overwrites.
+
+    Args:
+        **perms: Permission names and required boolean values; unknown names are rejected.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     async def predicate(ctx: Context) -> bool:
         return await _check_fluxer_permissions(ctx, ctx.author.id, perms)
 
@@ -470,56 +798,129 @@ def has_permissions(**perms: bool) -> Callable[[Any], Any]:
 
 
 def has_guild_permissions(**perms: bool) -> Callable[[Any], Any]:
-    return has_permissions(**perms)
+    """Check the caller's guild role permissions without channel overwrites.
+
+    Args:
+        **perms: Permission names and required boolean values; unknown names are rejected.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
+    async def predicate(ctx: Context) -> bool:
+        return await _check_fluxer_permissions(
+            ctx, ctx.author.id, perms, guild_only=True
+        )
+
+    return check(predicate)
 
 
 def bot_has_permissions(**perms: bool) -> Callable[[Any], Any]:
+    """Check the bot member's effective channel permissions.
+
+    Args:
+        **perms: Permission names and required boolean values; unknown names are rejected.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     async def predicate(ctx: Context) -> bool:
-        bot_user = ctx.bot.user
-        if bot_user is None:
-            return False
-        return await _check_fluxer_permissions(ctx, bot_user.id, perms)
+        return ctx.bot.user is not None and await _check_fluxer_permissions(
+            ctx, ctx.bot.user.id, perms
+        )
 
     return check(predicate)
 
 
 def bot_has_guild_permissions(**perms: bool) -> Callable[[Any], Any]:
-    return bot_has_permissions(**perms)
+    """Check the bot member's guild permissions without channel overwrites.
+
+    Args:
+        **perms: Permission names and required boolean values; unknown names are rejected.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
+    async def predicate(ctx: Context) -> bool:
+        return ctx.bot.user is not None and await _check_fluxer_permissions(
+            ctx, ctx.bot.user.id, perms, guild_only=True
+        )
+
+    return check(predicate)
 
 
 def bot_has_role(item: int | str) -> Callable[[Any], Any]:
+    """Require the bot's guild member to hold the specified role.
+
+    Args:
+        item: Role name or ID required by this check.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     async def predicate(ctx: Context) -> bool:
-        bot_user = ctx.bot.user
-        roles = getattr(bot_user, "roles", []) if bot_user is not None else []
-        role_ids = {str(getattr(role, "id", role)) for role in roles}
-        return str(item) in role_ids
+        return ctx.bot.user is not None and await _member_has_role(
+            ctx, ctx.bot.user.id, (item,)
+        )
 
     return check(predicate)
 
 
 def bot_has_any_role(*items: int | str) -> Callable[[Any], Any]:
+    """Require the bot's guild member to hold at least one specified role.
+
+    Args:
+        *items: Alternative role names or IDs accepted by this check.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     async def predicate(ctx: Context) -> bool:
-        bot_user = ctx.bot.user
-        roles = getattr(bot_user, "roles", []) if bot_user is not None else []
-        role_ids = {str(getattr(role, "id", role)) for role in roles}
-        return any(str(item) in role_ids for item in items)
+        return ctx.bot.user is not None and await _member_has_role(
+            ctx, ctx.bot.user.id, items
+        )
 
     return check(predicate)
 
 
 def is_nsfw() -> Callable[[Any], Any]:
+    """Restrict invocation to a channel marked as mature content.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
     return check(lambda ctx: bool(getattr(ctx.channel, "nsfw", False)))
 
 
 def guild_only() -> Callable[[Any], Any]:
+    """Restrict command invocation to guild channels.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
     return check(lambda ctx: ctx.guild is not None)
 
 
 def dm_only() -> Callable[[Any], Any]:
+    """Restrict command invocation to private channels.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
     return check(lambda ctx: ctx.guild is None)
 
 
 def is_owner() -> Callable[[Any], Any]:
+    """Check whether the invocation author is a configured bot owner.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     async def predicate(ctx: Context) -> bool:
         return await ctx.bot.is_owner(ctx.author)
 
@@ -529,6 +930,17 @@ def is_owner() -> Callable[[Any], Any]:
 def cooldown(
     rate: int, per: float, type: BucketType = BucketType.default
 ) -> Callable[[Any], Any]:
+    """Apply a local command cooldown independent of Fluxer HTTP limits.
+
+    Args:
+        rate: Number of uses permitted during the local cooldown interval.
+        per: Length of the local cooldown interval in seconds.
+        type: Type used by this operation.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     def decorator(func: Any) -> Any:
         mapping = CooldownMapping.from_cooldown(rate, per, type)
         if isinstance(func, Command):
@@ -543,6 +955,17 @@ def cooldown(
 def max_concurrency(
     number: int, per: BucketType = BucketType.default, *, wait: bool = False
 ) -> Callable[[Any], Any]:
+    """Bound concurrent invocations within the selected command bucket.
+
+    Args:
+        number: Maximum concurrent command invocations allowed for a bucket.
+        per: Length of the local cooldown interval in seconds.
+        wait: Whether to return the created webhook message instead of an empty response.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
+
     def decorator(func: Any) -> Any:
         value = MaxConcurrency(number, per, wait=wait)
         if isinstance(func, Command):
@@ -555,10 +978,53 @@ def max_concurrency(
 
 
 def before_invoke(coro: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Register the coroutine run immediately before command execution.
+
+    Args:
+        coro: Coroutine function invoked by the task or command wrapper.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
     setattr(coro, "__before_invoke__", True)
     return coro
 
 
 def after_invoke(coro: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Register the coroutine run after command execution.
+
+    Args:
+        coro: Coroutine function invoked by the task or command wrapper.
+
+    Returns:
+        The configured decorator or callback wrapper.
+    """
     setattr(coro, "__after_invoke__", True)
     return coro
+
+
+__all__ = (
+    "Command",
+    "GroupMixin",
+    "Group",
+    "command",
+    "group",
+    "check",
+    "check_any",
+    "has_role",
+    "has_any_role",
+    "has_permissions",
+    "has_guild_permissions",
+    "bot_has_permissions",
+    "bot_has_guild_permissions",
+    "bot_has_role",
+    "bot_has_any_role",
+    "is_nsfw",
+    "guild_only",
+    "dm_only",
+    "is_owner",
+    "cooldown",
+    "max_concurrency",
+    "before_invoke",
+    "after_invoke",
+)

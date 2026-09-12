@@ -1,3 +1,8 @@
+"""Init helpers and public types for fluxer.py.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from .attachment import Attachment
 from .channel import Channel
 from .embed import Embed

@@ -1,3 +1,8 @@
+"""Repeatable upload bytes and filenames with explicit file ownership.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,6 +39,14 @@ class File:
         with open("image.png", "rb") as f:
             file = File(f, filename="image.png")
             await channel.send(file=file)
+
+
+
+    Attributes:
+        fp: A file-like object, path string, or bytes to upload.
+        spoiler: Whether to mark the file as a spoiler (adds SPOILER_ prefix).
+        description: Optional description for the file (alt text).
+        filename: The filename to use when uploading.
     """
 
     def __init__(
@@ -44,16 +57,29 @@ class File:
         spoiler: bool = False,
         description: str | None = None,
     ) -> None:
-        self.fp = fp
+        """Initialize the file with the supplied configuration.
+
+        Args:
+            fp: Source file, path, or bytes used by the file operation.
+            filename: Filename presented to the server and recipients.
+            spoiler: Whether the upload filename receives the SPOILER_ prefix.
+            description: Descriptive text associated with this object.
+        """
+        self.fp: str | bytes | Path | BinaryIO = fp
         self._filename = filename
-        self.spoiler = spoiler
-        self.description = description
+        self.spoiler: bool = spoiler
+        self.description: str | None = description
+        self._data: bytes | None = None
         self._closer: BinaryIO | None = None
         self._original_pos: int | None = None
 
     @property
     def filename(self) -> str:
-        """The filename to use when uploading."""
+        """The filename to use when uploading.
+
+        Returns:
+            The result of this operation.
+        """
         if self._filename:
             name = self._filename
         elif isinstance(self.fp, (str, Path)):
@@ -110,21 +136,48 @@ class File:
         Returns:
             A dictionary with 'data' and 'filename' keys.
         """
-        return {
-            "data": self._get_bytes(),
-            "filename": self.filename,
-        }
+        if self._data is None:
+            self._data = self._get_bytes()
+        payload: dict[str, Any] = {"data": self._data, "filename": self.filename}
+        if self.description is not None:
+            payload["description"] = self.description
+        return payload
 
     def close(self) -> None:
-        """Close the underlying file handle if it was opened by this File object."""
+        """Close the underlying file handle if it was opened by this File object.
+
+        Returns:
+            None.
+        """
         if self._closer:
             self._closer.close()
 
     def __enter__(self) -> File:
+        """Enter the synchronous context and return this object.
+
+        Returns:
+            This instance, allowing chained calls.
+        """
         return self
 
     def __exit__(self, *args: Any) -> None:
+        """Release resources when leaving the synchronous context.
+
+        Args:
+            *args: Positional arguments forwarded to the wrapped callback.
+
+        Returns:
+            None.
+        """
         self.close()
 
     def __repr__(self) -> str:
+        """Return a diagnostic representation of this object.
+
+        Returns:
+            The result of this operation.
+        """
         return f"<File filename={self.filename!r}>"
+
+
+__all__ = ("File",)

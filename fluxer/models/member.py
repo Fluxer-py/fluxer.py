@@ -1,6 +1,15 @@
+"""Member helpers and public types for fluxer.py.
+
+This module documents the existing implementation and its supported public surface.
+"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from .._endpoints import asset_url
+
+from .._types import UNSET, UnsetType
+
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -15,6 +24,27 @@ class GuildMember:
 
     This combines a User object with guild-specific information like
     nickname, roles, join date, etc.
+
+    Attributes:
+        user: The account the membership belongs to.
+        nick: The nickname the account uses in this guild, or null when none is set.
+        avatar_hash: Avatar content hash, or None when no avatar is available.
+        banner: The image hash of the guild-specific banner, or null when none is set.
+        accent_color: The guild profile accent colour as packed 24-bit RGB, or null when none is set.
+        roles: The IDs of the roles assigned to the membership (max 250).
+        joined_at: The time the account became a member of this guild.
+        guild_id: Guild identity retained from the payload or operation context.
+        join_source_type: Join source type used by this operation.
+        source_invite_code: Source invite code used by this operation.
+        inviter_id: Identity of the inviter used by this operation.
+        mute: Whether a moderator has muted the member in voice.
+        deaf: Whether a moderator has deafened the member in voice.
+        communication_disabled_until: The time the communication timeout expires, or null when the member is not timed out.
+        profile_flags: The guild member profile flags set on the membership.
+        mention_flags: The reply mention preference that applies only inside this guild.
+        display_name: The best display name for this member.
+        mention: Return a string that mentions this member.
+        guild_avatar_url: URL for the member's guild-specific avatar, if set.
     """
 
     # The underlying user
@@ -42,6 +72,9 @@ class GuildMember:
     communication_disabled_until: str | None = None  # Timeout until (ISO 8601)
 
     # Back-reference (set after construction)
+    profile_flags: int | None = None
+    mention_flags: int | None = None
+
     _http: HTTPClient | None = field(default=None, repr=False)
 
     @classmethod
@@ -53,6 +86,16 @@ class GuildMember:
         guild_id: int | None = None,
     ) -> GuildMember:
         # Parse the nested user object
+        """Build a GuildMember from its decoded payload.
+
+        Args:
+            data: Decoded payload to parse; omitted fields retain the parser's documented defaults.
+            http: Transport to bind for subsequent operations; None creates an unbound model.
+            guild_id: Identity of the guild used by this operation.
+
+        Returns:
+            A parsed GuildMember instance.
+        """
         user = User.from_data(data["user"], http)
 
         return cls(
@@ -71,6 +114,8 @@ class GuildMember:
             communication_disabled_until=data.get("communication_disabled_until"),
             guild_id=guild_id
             or (int(data["guild_id"]) if data.get("guild_id") else None),
+            profile_flags=data.get("profile_flags", None),
+            mention_flags=data.get("mention_flags", None),
             _http=http,
         )
 
@@ -79,22 +124,37 @@ class GuildMember:
         """The best display name for this member.
 
         Priority: guild nickname > global name > username
+
+        Returns:
+            The result of this operation.
         """
         return self.nick or self.user.global_name or self.user.username
 
     @property
     def mention(self) -> str:
-        """Return a string that mentions this member."""
+        """Return a string that mentions this member.
+
+        Returns:
+            The result of this operation.
+        """
         return f"<@{self.user.id}>"
 
     @property
     def guild_avatar_url(self) -> str | None:
-        """URL for the member's guild-specific avatar, if set."""
+        """URL for the member's guild-specific avatar, if set.
+
+        Returns:
+            The result of this operation.
+        """
         if self.avatar_hash:
             ext = "gif" if self.avatar_hash.startswith("a_") else "png"
             # Note: Guild avatar URLs might have a different format
             # Adjust if Fluxer uses a different URL structure
-            return f"https://fluxerusercontent.com/guilds/avatars/{self.user.id}/{self.avatar_hash}.{ext}"
+            return asset_url(
+                self._http,
+                "media",
+                f"guilds/{self.guild_id}/users/{self.user.id}/avatars/{self.avatar_hash}.{ext}",
+            )
         return None
 
     # -- Role Management Methods --
@@ -104,6 +164,9 @@ class GuildMember:
         Args:
             role_id: Role ID to add
             reason: Reason for audit log
+
+        Returns:
+            None.
         """
         if not self._http:
             raise RuntimeError("Cannot add role without HTTPClient")
@@ -123,6 +186,9 @@ class GuildMember:
         Args:
             role_id: Role ID to remove
             reason: Reason for audit log
+
+        Returns:
+            None.
         """
         if not self._http:
             raise RuntimeError("Cannot remove role without HTTPClient")
@@ -153,6 +219,9 @@ class GuildMember:
 
         Args:
             reason: Reason for audit log
+
+        Returns:
+            None.
         """
         if not self._http:
             raise RuntimeError("Cannot kick member without HTTPClient")
@@ -174,6 +243,9 @@ class GuildMember:
             delete_message_days: Number of days to delete messages for (0-7)
             delete_message_seconds: Number of seconds to delete messages for (0-604800)
             reason: Reason for audit log
+
+        Returns:
+            None.
         """
         if not self._http:
             raise RuntimeError("Cannot ban member without HTTPClient")
@@ -215,12 +287,12 @@ class GuildMember:
     async def edit(
         self,
         *,
-        nick: str | None = None,
+        nick: str | None | UnsetType = UNSET,
         roles: list[int | str] | None = None,
         mute: bool | None = None,
         deaf: bool | None = None,
-        channel_id: int | None = None,
-        communication_disabled_until: str | None = None,
+        channel_id: int | None | UnsetType = UNSET,
+        communication_disabled_until: str | None | UnsetType = UNSET,
         reason: str | None = None,
     ) -> "GuildMember":
         """Edit this member.
@@ -253,19 +325,24 @@ class GuildMember:
             communication_disabled_until=communication_disabled_until,
             reason=reason,
         )
-        # Update local fields
-        if "nick" in data:
-            self.nick = data["nick"]
-        if "roles" in data:
-            self.roles = [int(r) for r in data["roles"]]
-        if "mute" in data:
-            self.mute = data["mute"]
-        if "deaf" in data:
-            self.deaf = data["deaf"]
-        if "communication_disabled_until" in data:
-            self.communication_disabled_until = data["communication_disabled_until"]
+        updated = GuildMember.from_data(
+            {"user": {"id": str(self.user.id)}, **data},
+            self._http,
+            guild_id=self.guild_id,
+        )
+        if "user" not in data:
+            updated.user = self.user
+        for attribute in fields(self):
+            setattr(self, attribute.name, getattr(updated, attribute.name))
         return self
 
     def __str__(self) -> str:
-        """Return the member's display name."""
+        """Return the member's display name.
+
+        Returns:
+            The result of this operation.
+        """
         return self.display_name
+
+
+__all__ = ("GuildMember",)

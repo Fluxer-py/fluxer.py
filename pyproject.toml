@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fluxer.py"
-version = "0.5.0-alpha.1"
+version = "0.5.0-alpha.2"
 description = "A Python wrapper for the Fluxer API"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = "MIT"
@@ -54,3 +54,15 @@ dev = [
     "pyright>=1.1.408",
     "ruff>=0.15.0",
 ]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+extend-select = ["D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]

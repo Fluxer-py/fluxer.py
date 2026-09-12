@@ -33,6 +33,9 @@ class Cog:
             async def on_message(self, message):
                 # This will be called for every message
                 pass
+
+    Attributes:
+        bot: Client owning this command, cog, or context.
     """
 
     def __init__(self, bot: Bot) -> None:
@@ -41,7 +44,7 @@ class Cog:
         Args:
             bot: The bot instance this cog is attached to.
         """
-        self.bot = bot
+        self.bot: Bot = bot
         self._commands: dict[str, EventHandler] = {}
         self._listeners: dict[str, list[EventHandler]] = {}
 
@@ -84,6 +87,9 @@ class Cog:
             @Cog.command(name="hi")
             async def hello(self, ctx):
                 await ctx.reply("Hello!")
+
+        Returns:
+            The configured decorator or callback wrapper.
         """
 
         def decorator(func: EventHandler) -> EventHandler:
@@ -109,6 +115,9 @@ class Cog:
             @Cog.listener(name="on_ready")
             async def bot_ready(self):
                 print("Bot is ready!")
+
+        Returns:
+            The configured decorator or callback wrapper.
         """
 
         def decorator(func: EventHandler) -> EventHandler:
@@ -123,6 +132,9 @@ class Cog:
         """Called when the cog is loaded.
 
         Override this to run setup code when the cog is added to the bot.
+
+        Returns:
+            None.
         """
         pass
 
@@ -130,8 +142,19 @@ class Cog:
         """Called when the cog is unloaded.
 
         Override this to run cleanup code when the cog is removed from the bot.
+
+        Returns:
+            None.
         """
         pass
 
     def __repr__(self) -> str:
+        """Return a diagnostic representation of this object.
+
+        Returns:
+            The result of this operation.
+        """
         return f"<Cog {self.__class__.__name__}>"
+
+
+__all__ = ("Cog",)
