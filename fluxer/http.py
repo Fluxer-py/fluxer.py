@@ -1811,27 +1811,51 @@ class HTTPClient:
         allow: int | str | None | UnsetType = UNSET,
         deny: int | str | None | UnsetType = UNSET,
         type: int = 0,
-        **kwargs: Any,
     ) -> None:
         """PUT /channels/{channel_id}/permissions/{overwrite_id} — Edit channel permission overwrites.
 
         Args:
             channel_id: Channel ID
-            overwrite_id: Role or user ID
-            allow: Allowed permissions (bitwise)
-            deny: Denied permissions (bitwise)
-            type: 0 for role, 1 for member
-            **kwargs: Additional options forwarded to the underlying operation.
+            overwrite_id: Role or member ID.
+            allow: Allowed permission mask, with null or omission treated as zero.
+            deny: Denied permission mask, with null or omission treated as zero.
+            type: Zero for a role or one for a member.
 
         Returns:
-            None (204 No Content)
+            None.
+
+        Raises:
+            TypeError: A mask or overwrite type has an unsupported type.
+            ValueError: A mask or overwrite type is outside the documented range.
         """
+        if isinstance(type, bool) or not isinstance(type, int):
+            raise TypeError("Overwrite type must be an integer")
+        if type not in (0, 1):
+            raise ValueError("Overwrite type must be 0 for a role or 1 for a member")
+
+        def validated_mask(value: int | str, name: str) -> str:
+            if isinstance(value, bool):
+                raise TypeError(f"{name} must be an integer permission mask")
+            if isinstance(value, str):
+                if not value.isdecimal():
+                    raise ValueError(f"{name} must be an unsigned decimal integer")
+                mask = int(value)
+            elif isinstance(value, int):
+                mask = int(value)
+            else:
+                raise TypeError(f"{name} must be an integer permission mask")
+            maximum = (1 << 63) - 1
+            if not 0 <= mask <= maximum:
+                raise ValueError(f"{name} must be between 0 and {maximum}")
+            return str(mask)
+
         payload: dict[str, Any] = {"type": type}
         if not isinstance(allow, UnsetType):
-            payload["allow"] = str(allow) if allow is not None else None
+            payload["allow"] = (
+                validated_mask(allow, "allow") if allow is not None else None
+            )
         if not isinstance(deny, UnsetType):
-            payload["deny"] = str(deny) if deny is not None else None
-        payload.update(kwargs)
+            payload["deny"] = validated_mask(deny, "deny") if deny is not None else None
         await self.request(
             self._route(
                 "PUT",
@@ -1840,6 +1864,30 @@ class HTTPClient:
                 overwrite_id=overwrite_id,
             ),
             json=payload,
+            headers={"X-Fluxer-Features": "view_channel_members_permission"},
+        )
+
+    async def delete_channel_permissions(
+        self,
+        channel_id: int | str,
+        overwrite_id: int | str,
+    ) -> None:
+        """Delete one guild-channel permission overwrite idempotently.
+
+        Args:
+            channel_id: Channel containing the overwrite.
+            overwrite_id: Role or member ID targeted by the overwrite.
+
+        Returns:
+            None.
+        """
+        await self.request(
+            self._route(
+                "DELETE",
+                "/channels/{channel_id}/permissions/{overwrite_id}",
+                channel_id=channel_id,
+                overwrite_id=overwrite_id,
+            ),
             headers={"X-Fluxer-Features": "view_channel_members_permission"},
         )
 

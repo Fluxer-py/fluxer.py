@@ -9,7 +9,8 @@ __author__ = "Emil"
 __license__ = "MIT"
 
 # Core classes
-from .client import Bot, Client, when_mentioned_or, when_mentioned
+from .client import Client
+from .ext.commands import Bot, when_mentioned_or, when_mentioned
 from .cog import Cog
 from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
 from .file import File
@@ -32,6 +33,12 @@ from .checks import has_role, has_permission
 from .colour import Color, Colour
 from .mentions import AllowedMentions
 from .object import Object
+from .permissions import (
+    ChannelPermissionOverwrite,
+    PermissionOverwrite,
+    PermissionOverwritePayload,
+    PermissionOverwriteType,
+)
 
 # Errors
 from .errors import (
@@ -104,6 +111,7 @@ __all__ = [
     "GatewayOpcode",
     "Intents",
     "Permissions",
+    "PermissionOverwriteType",
     "SearchAuthorType",
     "SearchContentType",
     "SearchEmbedType",
@@ -123,6 +131,7 @@ __all__ = [
     "Unauthorized",
     # Models
     "Channel",
+    "ChannelPermissionOverwrite",
     "Embed",
     "Emoji",
     "Guild",
@@ -131,6 +140,8 @@ __all__ = [
     "MessageReference",
     "DeletedReferencedMessage",
     "PartialMessage",
+    "PermissionOverwrite",
+    "PermissionOverwritePayload",
     "Reaction",
     "Role",
     "SearchIndexing",

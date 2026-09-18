@@ -634,7 +634,7 @@ class HelpCommand:
             return await self.send_cog_help(cog)
 
         keys = command.split()
-        cmd = bot.all_commands.get(keys[0])
+        cmd = bot.all_commands.get(bot._command_key(keys[0]))
         if cmd is None:
             error = await _maybe_await(
                 self.command_not_found(self.remove_mentions(keys[0]))
@@ -647,7 +647,7 @@ class HelpCommand:
                     self.subcommand_not_found(cmd, self.remove_mentions(key))
                 )
                 return await self.send_error_message(error)
-            found = cmd.all_commands.get(key)
+            found = cmd.all_commands.get(cmd._command_key(key))
             if found is None:
                 error = await _maybe_await(
                     self.subcommand_not_found(cmd, self.remove_mentions(key))

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0-alpha.3] (development) - 2026-09-18
+
+### Added
+
+- Added rework version disclaimer to documentation
+- Channel permission handling (read & write)
+- Added default help command for fluxer.Bot
+
+### Changed
+
+- Moved documentation-like texts from README.md to the [docs site](https://py.fluxer.how)
+- Removed legacy Bot implementation and moved to the new full-featured version
+
 ## [0.5.0-alpha.2] (development) - 2026-09-12
 
 ### Added, Changed & Fixed

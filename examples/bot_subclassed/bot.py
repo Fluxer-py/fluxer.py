@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 import fluxer
+from fluxer.ext.commands import Context
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,11 +35,11 @@ class MyBot(fluxer.Bot):
         # Though it doesn't look nice, you can define commands and events in the constructor like this, but it's generally recommended to use cogs for better organization and separation of concerns, this is just an example to show that it's possible
         # We are working on a better way to implement these directly in the bot subclass, but for now this is how you would do it without cogs
         @self.command(name="ping")
-        async def ping(ctx: fluxer.Message) -> None:
+        async def ping(ctx: Context) -> None:
             """Reply with Pong!
 
             Args:
-                ctx: Message that invoked the command.
+                ctx: Context for the command invocation.
             """
             logger.info(f"Received ping command from {ctx.author.display_name}")
             await ctx.reply("Pong!")

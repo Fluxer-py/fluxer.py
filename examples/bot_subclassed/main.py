@@ -8,7 +8,7 @@ Feel free to delete this docstring once you copy the code :)
 Happy coding!
 """
 
-from .bot import MyBot
+from bot import MyBot
 import os
 
 bot = MyBot(command_prefix=os.getenv("PREFIX", "!"))

@@ -13,7 +13,11 @@ site_name = "Fluxer.py - Docs"
 nav = [
   # { "Get started" = "index.md" },
   # { "Markdown in 5min" = "markdown.md" },
-  { "Hello!" = "base-index.md" },
+  { "Hello!" = "index.md" },
+  { "READ THIS FIRST" = "docs-disclaimer.md" },
+  { "Bot or Client?" = "bot-vs-client.md" },
+  { "Your first bot" = "quick-start.md" },
+  { "More info" = "readme.md" },
 ]
 
 # extra_css = ["stylesheets/extra.css"]

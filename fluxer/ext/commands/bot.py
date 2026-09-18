@@ -9,7 +9,7 @@ import importlib
 import inspect
 import sys
 from collections.abc import Awaitable, Callable, Iterable
-from typing import Any, Coroutine, TypeGuard, cast
+from typing import Any, TypeGuard, cast
 
 from ...client import Client
 from ...enums import Intents
@@ -87,7 +87,6 @@ class Bot(GroupMixin, Client):
     """
 
     description: str
-    case_insensitive: bool
     owner_id: int | None
     owner_ids: set[int]
 
@@ -130,12 +129,11 @@ class Bot(GroupMixin, Client):
         GroupMixin.__init__(self)
         self.command_prefix: Prefix = command_prefix
         self.description = description or ""
-        self.case_insensitive = bool(options.get("case_insensitive", False))
+        self._case_insensitive = bool(options.get("case_insensitive", False))
         self.owner_id = options.get("owner_id")
         self.owner_ids = set(options.get("owner_ids", ()))
         self._checks: list[Callable[[Context], Any]] = []
         self._check_once: list[Callable[[Context], Any]] = []
-        self._listeners: dict[str, list[Callable[..., Awaitable[Any]]]] = {}
         self._cogs: dict[str, Any] = {}
         self._extensions: dict[str, Any] = {}
         self._before_invoke: Callable[[Context], Awaitable[Any]] | None = None
@@ -198,91 +196,6 @@ class Bot(GroupMixin, Client):
         self._help_command = value
         if value is not None:
             value._add_to_bot(self)
-
-    def dispatch(self, event_name: str, *args: Any, **kwargs: Any) -> None:
-        """Dispatch.
-
-        Args:
-            event_name: Event name dispatched to registered callbacks.
-            *args: Positional arguments forwarded to the wrapped callback.
-            **kwargs: Additional options forwarded to the underlying operation.
-
-        Returns:
-            None.
-        """
-        self._listeners.setdefault(event_name, [])
-        for listener in list(self._listeners[event_name]):
-            self.loop_create_task(listener(*args, **kwargs))
-
-    def loop_create_task(self, coro: Awaitable[Any]) -> None:
-        """Loop create task.
-
-        Args:
-            coro: Coroutine function invoked by the task or command wrapper.
-
-        Returns:
-            None.
-        """
-        import asyncio
-
-        asyncio.create_task(cast(Coroutine[Any, Any, Any], coro))
-
-    def add_listener(
-        self, func: Callable[..., Awaitable[Any]], name: str | None = None
-    ) -> None:
-        """Add listener.
-
-        Args:
-            func: Callable registered or applied by this helper.
-            name: Name to assign or resolve in this operation.
-
-        Returns:
-            None.
-        """
-        self._listeners.setdefault(name or func.__name__, []).append(func)
-        self._event_handlers.setdefault(name or func.__name__, []).append(
-            cast(Callable[..., Coroutine[Any, Any, None]], func)
-        )
-
-    def remove_listener(
-        self, func: Callable[..., Awaitable[Any]], name: str | None = None
-    ) -> None:
-        """Remove listener.
-
-        Args:
-            func: Callable registered or applied by this helper.
-            name: Name to assign or resolve in this operation.
-
-        Returns:
-            None.
-        """
-        listeners = self._listeners.get(name or func.__name__, [])
-        if func in listeners:
-            listeners.remove(func)
-        handlers = self._event_handlers.get(name or func.__name__, [])
-        handler = cast(Callable[..., Coroutine[Any, Any, None]], func)
-        if handler in handlers:
-            handlers.remove(handler)
-
-    def listen(
-        self, name: str | None = None
-    ) -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
-        """Register a coroutine as a listener for the selected event.
-
-        Args:
-            name: Name to assign or resolve in this operation.
-
-        Returns:
-            The configured decorator or callback wrapper.
-        """
-
-        def decorator(
-            func: Callable[..., Awaitable[Any]],
-        ) -> Callable[..., Awaitable[Any]]:
-            self.add_listener(func, name)
-            return func
-
-        return decorator
 
     def check(self, func: Callable[[Context], Any]) -> Callable[[Context], Any]:
         """Register a condition that must pass before command invocation.
@@ -434,7 +347,7 @@ class Bot(GroupMixin, Client):
         view.index = len(prefix)
         view.skip_ws()
         invoked = view.get_word()
-        lookup = invoked.lower() if self.case_insensitive else invoked
+        lookup = self._command_key(invoked)
         command = self.all_commands.get(lookup)
         ctx.invoked_with = invoked
         ctx.command = command
@@ -512,7 +425,8 @@ class Bot(GroupMixin, Client):
         )
         if name in self._cogs:
             raise ValueError(f"Cog {name!r} is already loaded")
-        self._cogs[name] = cog
+        bound_commands: list[Command] = []
+        pending = self.all_commands.copy()
         for command in cog.get_commands():
             bound = command.copy()
             bound.cog = cog
@@ -520,7 +434,13 @@ class Bot(GroupMixin, Client):
                 bound.walk_commands() if hasattr(bound, "walk_commands") else [bound]
             ):
                 child.cog = cog
+            self._check_command(bound, pending)
+            bound_commands.append(bound)
+            for invocation in (bound.name, *bound.aliases):
+                pending[self._command_key(invocation)] = bound
+        for bound in bound_commands:
             self.add_command(bound)
+        self._cogs[name] = cog
         for listener_name, listener in cog.get_listeners():
             self.add_listener(listener, listener_name)
         await cog.cog_load()

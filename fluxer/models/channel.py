@@ -10,6 +10,16 @@ from datetime import datetime
 from collections.abc import AsyncIterator, Callable, Generator
 from typing import TYPE_CHECKING, Any
 
+from .._types import UNSET, UnsetType
+from ..permissions import (
+    ChannelPermissionOverwrite,
+    PermissionOverwrite,
+    PermissionOverwritePayload,
+    PermissionOverwriteType,
+    Permissions,
+    _effective_permissions,
+    parse_permission_overwrite,
+)
 from ..utils import process_embed_args
 from .user import User
 
@@ -33,7 +43,9 @@ if TYPE_CHECKING:
     from ..voice import VoiceClient
     from .embed import Embed
     from .guild import Guild
+    from .member import GuildMember
     from .message import Message, PartialMessage
+    from .role import Role
 
 
 class _TypingContext:
@@ -90,6 +102,7 @@ class Channel:
         is_voice_channel: Whether this is a voice channel.
         is_dm: Whether this is a DM channel.
         is_category: Whether this is a category channel.
+        overwrites: Immutable typed permission overwrite records.
     """
 
     id: int
@@ -114,7 +127,9 @@ class Channel:
     nsfw_override: bool | None = None
     content_warning_level: int = 0
     rate_limit_per_user: int = 0
-    permission_overwrites: list[dict[str, Any]] = field(default_factory=list)
+    permission_overwrites: list[PermissionOverwritePayload] = field(
+        default_factory=list
+    )
     nicks: dict[str, str] = field(default_factory=dict)
     recipients: list[User] = field(default_factory=list)
 
@@ -158,7 +173,10 @@ class Channel:
             nsfw_override=data.get("nsfw_override", None),
             content_warning_level=data.get("content_warning_level", 0),
             rate_limit_per_user=data.get("rate_limit_per_user", 0),
-            permission_overwrites=list(data.get("permission_overwrites", [])),
+            permission_overwrites=[
+                parse_permission_overwrite(item)
+                for item in data.get("permission_overwrites", [])
+            ],
             nicks=dict(data.get("nicks", {})),
             recipients=[
                 User.from_data(user, http) for user in data.get("recipients", [])
@@ -228,6 +246,225 @@ class Channel:
             Whether the documented condition holds for the current state.
         """
         return self.type == ChannelType.GUILD_CATEGORY
+
+    @property
+    def overwrites(self) -> list[ChannelPermissionOverwrite]:
+        """Return immutable typed permission overwrites for this channel.
+
+        Returns:
+            The channel's overwrite records in payload order.
+        """
+        return [
+            ChannelPermissionOverwrite.from_data(overwrite)
+            for overwrite in self.permission_overwrites
+        ]
+
+    def _require_guild_context(self) -> Guild:
+        if self.guild_id is None:
+            raise TypeError(
+                "Permission overwrites are available only on guild channels"
+            )
+        if self._guild is None:
+            raise RuntimeError("Channel is missing its bound guild context")
+        return self._guild
+
+    def _resolve_overwrite_target(
+        self,
+        target: Role | GuildMember | User | int,
+        overwrite_type: PermissionOverwriteType | int | None,
+    ) -> tuple[int, PermissionOverwriteType]:
+        from .member import GuildMember
+        from .role import Role
+
+        guild = self._require_guild_context()
+        explicit_type: PermissionOverwriteType | None = None
+        if overwrite_type is not None:
+            if isinstance(overwrite_type, bool):
+                raise TypeError("Overwrite type must be ROLE or MEMBER")
+            try:
+                explicit_type = PermissionOverwriteType(overwrite_type)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Overwrite type must be ROLE or MEMBER") from exc
+
+        inferred_type: PermissionOverwriteType
+        target_id: int
+        target_guild_id: int | None = None
+        if isinstance(target, Role):
+            target_id = target.id
+            target_guild_id = target.guild_id
+            inferred_type = PermissionOverwriteType.ROLE
+        elif isinstance(target, GuildMember):
+            target_id = target.user.id
+            target_guild_id = target.guild_id
+            inferred_type = PermissionOverwriteType.MEMBER
+        elif isinstance(target, User):
+            target_id = target.id
+            inferred_type = PermissionOverwriteType.MEMBER
+        elif isinstance(target, int) and not isinstance(target, bool):
+            target_id = target
+            if explicit_type is None:
+                raise TypeError("A bare target ID requires an overwrite type")
+            inferred_type = explicit_type
+        else:
+            raise TypeError("Target must be a Role, GuildMember, User, or integer ID")
+
+        if target_id <= 0:
+            raise ValueError("Overwrite target ID must be a positive integer snowflake")
+        if target_guild_id is not None and target_guild_id != guild.id:
+            raise ValueError("Overwrite target belongs to a different guild")
+        if explicit_type is not None and explicit_type != inferred_type:
+            raise ValueError("Explicit overwrite type conflicts with the target object")
+        return target_id, inferred_type
+
+    def overwrites_for(
+        self,
+        target: Role | GuildMember | User | int,
+        *,
+        type: PermissionOverwriteType | int | None = None,
+    ) -> PermissionOverwrite:
+        """Return the overwrite stored for one role or member.
+
+        Args:
+            target: Role, member, user, or explicitly typed target ID.
+            type: Target kind required for a bare integer ID.
+
+        Returns:
+            A mutable copy of the stored overwrite, or an empty overwrite.
+
+        Raises:
+            TypeError: The channel or target kind cannot hold an overwrite.
+            RuntimeError: The channel is missing guild context.
+            ValueError: The target type conflicts or belongs to another guild.
+        """
+        target_id, target_type = self._resolve_overwrite_target(target, type)
+        for overwrite in self.overwrites:
+            if overwrite.id == target_id and overwrite.type == target_type:
+                return overwrite.to_overwrite()
+        return PermissionOverwrite()
+
+    def permissions_for(self, member_or_user: GuildMember | User) -> Permissions:
+        """Calculate effective channel permissions from the bound guild cache.
+
+        Args:
+            member_or_user: Guild membership or user to resolve in the guild cache.
+
+        Returns:
+            The effective 64-bit permission mask, or an empty mask for a user
+            who is not a known member of the guild.
+
+        Raises:
+            TypeError: The channel is private or the argument is unsupported.
+            RuntimeError: Guild ownership, roles, or channel context is incomplete.
+        """
+        from .member import GuildMember
+
+        guild = self._require_guild_context()
+        member: GuildMember | None
+        if isinstance(member_or_user, GuildMember):
+            if member_or_user.guild_id not in (None, guild.id):
+                return Permissions(0)
+            member = member_or_user
+        elif isinstance(member_or_user, User):
+            member = next(
+                (
+                    candidate
+                    for candidate in guild.members
+                    if candidate.user.id == member_or_user.id
+                ),
+                None,
+            )
+            if member is None:
+                return Permissions(0)
+        else:
+            raise TypeError("permissions_for requires a GuildMember or User")
+
+        if guild.owner_id is None:
+            raise RuntimeError("Guild owner snapshot is incomplete")
+        if member.user.id == guild.owner_id:
+            return Permissions((1 << 64) - 1)
+
+        required_role_ids = {guild.id, *member.roles}
+        known_role_ids = {role.id for role in guild.roles}
+        missing_role_ids = required_role_ids - known_role_ids
+        if missing_role_ids:
+            missing = ", ".join(str(role_id) for role_id in sorted(missing_role_ids))
+            raise RuntimeError(f"Guild role snapshot is incomplete; missing: {missing}")
+
+        return _effective_permissions(
+            {"id": guild.id, "owner_id": guild.owner_id},
+            {"roles": member.roles},
+            [{"id": role.id, "permissions": role.permissions} for role in guild.roles],
+            member.user.id,
+            {"permission_overwrites": self.permission_overwrites},
+        )
+
+    async def set_permissions(
+        self,
+        target: Role | GuildMember | User | int,
+        *,
+        overwrite: PermissionOverwrite | None | UnsetType = UNSET,
+        type: PermissionOverwriteType | int | None = None,
+        **permissions: bool | None,
+    ) -> None:
+        """Create, replace, or delete one guild-channel overwrite.
+
+        Args:
+            target: Role, member, user, or explicitly typed target ID.
+            overwrite: Complete overwrite to write, or ``None`` to delete it.
+            type: Target kind required for a bare integer ID.
+            **permissions: Tri-state permission values used to build an overwrite.
+
+        Raises:
+            TypeError: Inputs are missing, mixed, or have unsupported types.
+            RuntimeError: The channel lacks guild or HTTP context.
+            ValueError: A permission or target value is invalid.
+        """
+        target_id, target_type = self._resolve_overwrite_target(target, type)
+        if not isinstance(overwrite, UnsetType) and permissions:
+            raise TypeError("Pass either overwrite or permission keywords, not both")
+        if isinstance(overwrite, UnsetType):
+            if not permissions:
+                raise TypeError("Provide an overwrite, permission keywords, or None")
+            resolved_overwrite: PermissionOverwrite | None = PermissionOverwrite(
+                **permissions
+            )
+        elif overwrite is None:
+            resolved_overwrite = None
+        elif isinstance(overwrite, PermissionOverwrite):
+            resolved_overwrite = overwrite
+        else:
+            raise TypeError("overwrite must be PermissionOverwrite or None")
+
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+
+        if resolved_overwrite is None:
+            await self._http.delete_channel_permissions(self.id, target_id)
+            self.permission_overwrites = [
+                item
+                for item in self.permission_overwrites
+                if int(item["id"]) != target_id
+            ]
+            return
+
+        allow, deny = resolved_overwrite.pair()
+        await self._http.edit_channel_permissions(
+            self.id,
+            target_id,
+            allow=allow,
+            deny=deny,
+            type=int(target_type),
+        )
+        stored = ChannelPermissionOverwrite(
+            id=target_id,
+            type=target_type,
+            allow=allow,
+            deny=deny,
+        ).to_dict()
+        self.permission_overwrites = [
+            item for item in self.permission_overwrites if int(item["id"]) != target_id
+        ]
+        self.permission_overwrites.append(stored)
 
     async def send(
         self,

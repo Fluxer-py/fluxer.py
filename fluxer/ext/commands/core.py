@@ -19,6 +19,7 @@ from .errors import (
     CommandInvokeError,
     CommandNotFound,
     CommandOnCooldown,
+    CommandRegistrationError,
     DisabledCommand,
     MissingRequiredArgument,
 )
@@ -397,6 +398,7 @@ class GroupMixin:
     Attributes:
         all_commands: All commands used by this operation.
         commands: Commands.
+        case_insensitive: Whether invocation names are compared without case.
     """
 
     def __init__(self) -> None:
@@ -406,6 +408,83 @@ class GroupMixin:
             Further behaviour is defined by the methods on this instance.
         """
         self.all_commands: OrderedDict[str, Command] = OrderedDict()
+        self._case_insensitive: bool = False
+
+    @property
+    def case_insensitive(self) -> bool:
+        """Return whether command lookup ignores letter case.
+
+        Returns:
+            Whether command names are compared without case.
+        """
+        return self._case_insensitive
+
+    @case_insensitive.setter
+    def case_insensitive(self, value: bool) -> None:
+        """Apply a case rule to this registry and its nested groups.
+
+        Args:
+            value: Whether command names should ignore letter case.
+
+        Raises:
+            CommandRegistrationError: Existing declarations would collide.
+        """
+        enabled = bool(value)
+        self._validate_case_rule(enabled)
+        self._apply_case_rule(enabled)
+
+    def _command_key(self, name: str) -> str:
+        return name.casefold() if self.case_insensitive else name
+
+    @staticmethod
+    def _describe_command(command: Command) -> str:
+        callback = command.callback
+        source = inspect.getsourcefile(callback) or "<unknown file>"
+        line = getattr(getattr(callback, "__code__", None), "co_firstlineno", "?")
+        return f"{callback.__module__}.{callback.__qualname__} ({source}:{line})"
+
+    def _raise_collision(self, name: str, incoming: Command, existing: Command) -> None:
+        container = self.qualified_name if isinstance(self, Group) else "bot"
+        raise CommandRegistrationError(
+            f"Command name {name!r} conflicts in {container}: "
+            f"{self._describe_command(incoming)} conflicts with "
+            f"{self._describe_command(existing)}"
+        )
+
+    def _checked_mapping(
+        self, commands: list[Command], insensitive: bool
+    ) -> OrderedDict[str, Command]:
+        mapping: OrderedDict[str, Command] = OrderedDict()
+        for command in commands:
+            for name in (command.name, *command.aliases):
+                key = name.casefold() if insensitive else name
+                existing = mapping.get(key)
+                if existing is not None:
+                    self._raise_collision(name, command, existing)
+                mapping[key] = command
+        return mapping
+
+    def _validate_case_rule(self, insensitive: bool) -> None:
+        self._checked_mapping(self.commands, insensitive)
+        for command in self.commands:
+            if isinstance(command, Group):
+                command._validate_case_rule(insensitive)
+
+    def _apply_case_rule(self, insensitive: bool) -> None:
+        self.all_commands = self._checked_mapping(self.commands, insensitive)
+        self._case_insensitive = insensitive
+        for command in self.commands:
+            if isinstance(command, Group):
+                command._apply_case_rule(insensitive)
+
+    def _check_command(
+        self, command: Command, mapping: OrderedDict[str, Command]
+    ) -> None:
+        if isinstance(command, Group):
+            command._validate_case_rule(self.case_insensitive)
+        self._checked_mapping(
+            [*dict.fromkeys(mapping.values()), command], self.case_insensitive
+        )
 
     @property
     def commands(self) -> list[Command]:
@@ -417,19 +496,24 @@ class GroupMixin:
         return list(dict.fromkeys(self.all_commands.values()))
 
     def add_command(self, command: Command) -> None:
-        """Add command.
+        """Register a command after checking its name and aliases.
 
         Args:
             command: Command to resolve, invoke, or display.
 
         Returns:
             None.
+
+        Raises:
+            CommandRegistrationError: A name or alias is already registered.
         """
+        self._check_command(command, self.all_commands)
         if isinstance(self, Group):
             command.parent = self
-        self.all_commands[command.name] = command
-        for alias in command.aliases:
-            self.all_commands[alias] = command
+        if isinstance(command, Group):
+            command._apply_case_rule(self.case_insensitive)
+        for name in (command.name, *command.aliases):
+            self.all_commands[self._command_key(name)] = command
 
     def remove_command(self, name: str) -> Command | None:
         """Remove command.
@@ -440,10 +524,11 @@ class GroupMixin:
         Returns:
             The result of this operation.
         """
-        command = self.all_commands.pop(name, None)
+        command = self.all_commands.get(self._command_key(name))
         if command:
-            for alias in list(command.aliases):
-                self.all_commands.pop(alias, None)
+            for key, registered in list(self.all_commands.items()):
+                if registered is command:
+                    self.all_commands.pop(key)
         return command
 
     def get_command(self, name: str) -> Command | None:
@@ -458,7 +543,7 @@ class GroupMixin:
         current: Command | None = None
         mapping: GroupMixin = self
         for part in name.split():
-            current = mapping.all_commands.get(part)
+            current = mapping.all_commands.get(mapping._command_key(part))
             if current is None:
                 return None
             if isinstance(current, Group):
@@ -601,7 +686,7 @@ class Group(GroupMixin, Command):
         view.skip_ws()
         old = view.index
         trigger = view.get_word()
-        subcommand = self.all_commands.get(trigger)
+        subcommand = self.all_commands.get(self._command_key(trigger))
         if subcommand is not None:
             subcommand.parent = self
             return await subcommand.invoke(ctx)

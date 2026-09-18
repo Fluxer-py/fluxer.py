@@ -13,6 +13,7 @@ import fluxer
 import os
 import logging
 import asyncio
+from fluxer.ext.commands import Context
 
 
 def get_log_level() -> int:
@@ -48,17 +49,17 @@ async def on_ready() -> None:
 
 # You can define commands directly in here, but it's not really tidy this way, consider using cogs
 @bot.command()
-async def ping(ctx: fluxer.Message) -> None:
+async def ping(ctx: Context) -> None:
     """Reply with Pong!
 
     Args:
-        ctx: Message that invoked the command.
+        ctx: Context for the command invocation.
     """
     logger.info(f"Received ping command from {ctx.author.display_name}")
     await ctx.reply("Pong!")
 
 
-# This will automatically load all your cogs found under the `cogs` directory, it has to be executed before running the bot, otherwise the cogs won't be loaded and their commands/listeners won't work.
+# Load local extensions before connecting to the Gateway.
 async def load_extensions() -> None:
     """Load Python extensions from the local cogs directory.
 
@@ -70,9 +71,13 @@ async def load_extensions() -> None:
             await bot.load_extension(f"cogs.{filename[:-3]}")
 
 
-# Run the bot, this will also load the cogs before starting the bot
-if __name__ == "__main__":
-    asyncio.run(load_extensions())
+async def main() -> None:
+    """Load extensions and start the bot."""
+    await load_extensions()
     # For security reasons, you SHOULDN'T just write your token here directly, but you can (and for example purposes we will just do that).
     # !! Consider using environment variables. !!
-    bot.run("token")
+    await bot.start("token")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
