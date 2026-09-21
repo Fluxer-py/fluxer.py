@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import pytest
-import types
 import sys
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -44,22 +43,16 @@ from fluxer.fluxer_models import (  # noqa: E402
     AttachmentUploadSpec,
     AuthorizedIP,
     BanEntry,
-    BulkOperationResult,
-    BulkEmojiResult,
-    BulkStickerResult,
     CallEligibility,
     CallState,
     CompletedAttachmentUploadList,
     DataHarvest,
-    DiscoveryApplication,
     DiscoveryGuild,
-    DiscoveryStatus,
     EntranceSound,
     EntranceSoundLibrary,
     FavoriteGif,
     FavoriteMeme,
     GiftCode,
-    GuildTransferResult,
     MFAState,
     Mention,
     PackDashboard,
@@ -69,16 +62,26 @@ from fluxer.fluxer_models import (  # noqa: E402
     Relationship,
     SavedMessage,
     ScheduledMessage,
-    SearchResult,
     SlowmodeState,
     Team,
     Theme,
     UserConnection,
     UserSettings,
-    VanityUrl,
     VoiceDebugSession,
     WebAuthnCredential,
-)
+)  # noqa: E402
+from fluxer.models.guild_results import (  # noqa: E402
+    BulkOperationResult,
+    BulkEmojiResult,
+    BulkStickerResult,
+    DiscoveryApplication,
+    DiscoveryStatus,
+    GuildTransferResult,
+    VanityUrl,
+)  # noqa: E402
+from fluxer.models.search import (  # noqa: E402
+    SearchResult,
+)  # noqa: E402
 from fluxer.gateway import GatewayPayload  # noqa: E402
 from fluxer.http import HTTPClient, Route  # noqa: E402
 

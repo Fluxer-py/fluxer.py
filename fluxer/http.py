@@ -6,11 +6,14 @@ preserves response variants, credential scope and rate-limit retry information.
 
 from __future__ import annotations
 import asyncio
+import base64
 import json as json_mod
 import logging
 import math
+import re
+import emoji as emoji_lib
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 import aiohttp
 from ._endpoints import Endpoints
@@ -23,14 +26,16 @@ from .errors import (
     NotFound,
     http_exception_from_status,
 )
-from .fluxer_models import (
-    SearchAuthorType,
-    SearchContentType,
-    SearchEmbedType,
-    SearchScope,
-    SearchSortBy,
-    SearchSortOrder,
-)
+
+if TYPE_CHECKING:
+    from .models.search import (
+        SearchAuthorType,
+        SearchContentType,
+        SearchEmbedType,
+        SearchScope,
+        SearchSortBy,
+        SearchSortOrder,
+    )
 
 __all__ = ("HTTPClient", "Route", "RateLimiter", "DEFAULT_API_URL")
 log = logging.getLogger(__name__)
@@ -1244,8 +1249,6 @@ class HTTPClient:
         Returns:
             Guild object
         """
-        import base64
-
         payload: dict[str, Any] = {"name": name}
         if icon:
             image_data = base64.b64encode(icon).decode("ascii")
@@ -1294,8 +1297,6 @@ class HTTPClient:
         Returns:
             The result of this operation.
         """
-        import base64
-
         payload: dict[str, Any] = {}
         if name is not None:
             payload["name"] = name
@@ -1910,8 +1911,6 @@ class HTTPClient:
         Returns:
             Updated user object
         """
-        import base64
-
         payload: dict[str, Any] = {}
         if username is not None:
             payload["username"] = username
@@ -1997,8 +1996,6 @@ class HTTPClient:
         Returns:
             Emoji object
         """
-        import base64
-
         image_data = base64.b64encode(image).decode("ascii")
         if image.startswith(b"\x89PNG"):
             mime_type = "image/png"
@@ -2098,8 +2095,6 @@ class HTTPClient:
         Returns:
             Sticker object
         """
-        import base64
-
         image_data = base64.b64encode(image).decode("ascii")
         if image.startswith(b"\x89PNG"):
             mime_type = "image/png"
@@ -2782,9 +2777,6 @@ class HTTPClient:
         )
 
     def _emoji_to_url_format(self, emoji: Any) -> str:
-        import re
-        import emoji as emoji_lib
-
         if getattr(emoji, "id", None) is not None:
             return f"{emoji.name}:{emoji.id}"
         value = (

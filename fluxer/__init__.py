@@ -3,7 +3,7 @@
 This module documents the existing implementation and its supported public surface.
 """
 
-__version__ = "0.4.2"
+__version__ = "0.5.0a3"
 __title__ = "fluxer.py"
 __author__ = "Emil"
 __license__ = "MIT"
@@ -14,7 +14,7 @@ from .ext.commands import Bot, when_mentioned_or, when_mentioned
 from .cog import Cog
 from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
 from .file import File
-from .fluxer_models import (
+from .models.search import (
     SearchAuthorType,
     SearchContentType,
     SearchEmbedType,

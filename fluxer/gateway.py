@@ -10,6 +10,7 @@ import json
 import logging
 import sys
 import warnings
+import random
 from collections import deque
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -460,8 +461,6 @@ class Gateway:
     async def _heartbeat_loop(self) -> None:
         """Periodically send heartbeats. If we miss an ACK, reconnect."""
         try:
-            import random
-
             await asyncio.sleep(self._heartbeat_interval * random.random())
             while True:
                 # Check if the connection is still active

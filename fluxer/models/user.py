@@ -12,11 +12,12 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..utils import snowflake_to_datetime
+from . import channel as channel_models
 
 if TYPE_CHECKING:
+    from .channel import Channel
     from ..file import File
     from ..http import HTTPClient
-    from .channel import Channel
     from .message import Message
 
 
@@ -313,12 +314,10 @@ class User:
         Returns:
             The Channel object for the DM.
         """
-        from .channel import Channel
-
         if self._http is None:
             raise RuntimeError("User is not bound to an HTTP client")
         data = await self._http.create_dm(self.id)
-        return Channel.from_data(data, self._http)
+        return channel_models.Channel.from_data(data, self._http)
 
     async def send(
         self,

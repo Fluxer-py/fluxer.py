@@ -16,8 +16,16 @@ from .member import GuildMember
 from .role import Role
 from ..sticker import Sticker
 
-from ..utils import snowflake_to_datetime
-from ..fluxer_models import (
+from .channel import Channel
+from .guild_results import (
+    BulkEmojiResult,
+    BulkStickerResult,
+    DiscoveryApplication,
+    DiscoveryStatus,
+    GuildTransferResult,
+    VanityUrl,
+)
+from .search import (
     SearchAuthorType,
     SearchContentType,
     SearchEmbedType,
@@ -26,18 +34,13 @@ from ..fluxer_models import (
     SearchSortOrder,
     parse_search_response,
 )
+from ..invite import Invite
+from ..audit_logs import AuditLog
+
+from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
-    from ..audit_logs import AuditLog
-    from ..fluxer_models import BulkEmojiResult
-    from ..fluxer_models import BulkStickerResult
-    from ..fluxer_models import DiscoveryApplication
-    from ..fluxer_models import DiscoveryStatus
-    from ..fluxer_models import GuildTransferResult
-    from ..fluxer_models import VanityUrl
-    from ..invite import Invite
     from ..http import HTTPClient
-    from .channel import Channel
 
 
 @dataclass(slots=True)
@@ -148,8 +151,6 @@ class Guild:
         Returns:
             A parsed Guild instance.
         """
-        from .channel import Channel
-
         data = {**data.get("properties", {}), **data}
         guild_id = int(data["id"])
         guild = cls(
@@ -254,8 +255,6 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot fetch emojis without HTTPClient")
 
-        from .emoji import Emoji
-
         data = await self._http.get_guild_emojis(self.id)
         # Pass guild_id when creating emojis since API doesn't always return it
         return [
@@ -272,8 +271,6 @@ class Guild:
         """
         if not self._http:
             raise RuntimeError("Cannot fetch roles without HTTPClient")
-
-        from .role import Role
 
         data = await self._http.get_guild_roles(self.id)
         return [
@@ -305,8 +302,6 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot create role without HTTPClient")
 
-        from .role import Role
-
         data = await self._http.create_guild_role(
             self.id,
             name=name,
@@ -330,8 +325,6 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot fetch member without HTTPClient")
 
-        from .member import GuildMember
-
         data = await self._http.get_guild_member(self.id, user_id)
         return GuildMember.from_data(data, self._http, guild_id=self.id)
 
@@ -349,8 +342,6 @@ class Guild:
         """
         if not self._http:
             raise RuntimeError("Cannot fetch members without HTTPClient")
-
-        from .member import GuildMember
 
         data = await self._http.get_guild_members(self.id, limit=limit, after=after)
         return [
@@ -428,8 +419,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..invite import Invite
-
         if not self._http:
             raise RuntimeError("Cannot fetch invites without HTTPClient")
         data = await self._http.get_guild_invites(self.id)
@@ -444,8 +433,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..audit_logs import AuditLog
-
         if not self._http:
             raise RuntimeError("Cannot fetch audit logs without HTTPClient")
         data = await self._http.get_guild_audit_logs(self.id, **kwargs)
@@ -468,8 +455,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import DiscoveryStatus
-
         if not self._http:
             raise RuntimeError("Cannot fetch discovery status without HTTPClient")
         return DiscoveryStatus.from_data(
@@ -485,8 +470,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import DiscoveryApplication
-
         if not self._http:
             raise RuntimeError("Cannot apply for discovery without HTTPClient")
         method = getattr(self._http, "apply_for_guild_discovery", None)
@@ -505,8 +488,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import DiscoveryApplication
-
         if not self._http:
             raise RuntimeError("Cannot edit discovery application without HTTPClient")
         method = getattr(self._http, "edit_guild_discovery_application", None)
@@ -545,8 +526,6 @@ class Guild:
         Returns:
             The requested vanity url.
         """
-        from ..fluxer_models import VanityUrl
-
         if not self._http:
             raise RuntimeError("Cannot fetch vanity URL without HTTPClient")
         return VanityUrl.from_data(
@@ -562,8 +541,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import VanityUrl
-
         if not self._http:
             raise RuntimeError("Cannot update vanity URL without HTTPClient")
         return VanityUrl.from_data(
@@ -582,8 +559,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import GuildTransferResult
-
         if not self._http:
             raise RuntimeError("Cannot transfer ownership without HTTPClient")
         return GuildTransferResult.from_data(
@@ -600,8 +575,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import BulkEmojiResult
-
         if not self._http:
             raise RuntimeError("Cannot create emojis without HTTPClient")
         return BulkEmojiResult.from_data(
@@ -619,8 +592,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import BulkStickerResult
-
         if not self._http:
             raise RuntimeError("Cannot create stickers without HTTPClient")
         return BulkStickerResult.from_data(

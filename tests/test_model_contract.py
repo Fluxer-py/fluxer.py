@@ -4,7 +4,8 @@ import pytest
 
 from fluxer import Client, Guild, Message, Permissions, Role, User
 from fluxer.audit_logs import AuditLogEntry
-from fluxer.fluxer_models import AppInfo, AuthSession, BulkEmojiResult, CallEligibility
+from fluxer.fluxer_models import AppInfo, AuthSession, CallEligibility
+from fluxer.models.guild_results import BulkEmojiResult
 from fluxer.models.message import DeletedReferencedMessage, MessageReference
 from fluxer.models.reaction import PartialEmoji
 from fluxer.permissions import _effective_permissions

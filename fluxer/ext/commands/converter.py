@@ -10,6 +10,8 @@ import re
 import types
 from typing import Any, Literal, Union, get_args, get_origin
 
+from ...invite import Invite
+from ... import utils
 from ...models import (
     Channel,
     Emoji,
@@ -313,8 +315,6 @@ class PartialEmojiConverter(Converter):
         Returns:
             The result of this operation.
         """
-        from ...models.reaction import PartialEmoji
-
         if argument.startswith("<") and argument.endswith(">") and ":" in argument:
             animated = argument.startswith("<a:")
             parts = argument.strip("<>").split(":")
@@ -360,8 +360,6 @@ class InviteConverter(Converter):
         Returns:
             The result of this operation.
         """
-        from ...invite import Invite
-
         if ctx.bot._http is None:
             raise BadArgument("Bot is not bound to an HTTP client")
         data = await ctx.bot._http.get_invite(argument)
@@ -398,8 +396,6 @@ class clean_content(Converter):
         Returns:
             The result of this operation.
         """
-        from ... import utils
-
         if self.remove_markdown:
             argument = utils.remove_markdown(argument)
         if self.escape_markdown:

@@ -16,6 +16,7 @@ from .message import Message, MessageReference, DeletedReferencedMessage
 from .attachment import Attachment
 from .reaction import Reaction
 from ..sticker import Sticker
+from .. import http as http_module
 
 if TYPE_CHECKING:
     from ..file import File
@@ -338,9 +339,8 @@ class Webhook:
     async def _validate_authority(self) -> None:
         if self._url_base is None or self._http is None:
             return
-        from ..http import HTTPClient
 
-        if isinstance(self._http, HTTPClient):
+        if isinstance(self._http, http_module.HTTPClient):
             await self._http._ensure_session()
             if self._http.api_url != self._url_base.rstrip("/"):
                 raise ValueError(

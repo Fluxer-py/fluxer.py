@@ -7,7 +7,7 @@ import pytest
 
 from fluxer import Channel, Client, Guild, SearchIndexing, SearchResult
 from fluxer.errors import BadRequest
-from fluxer.fluxer_models import parse_search_response
+from fluxer.models.search import parse_search_response
 from fluxer.http import HTTPClient
 
 

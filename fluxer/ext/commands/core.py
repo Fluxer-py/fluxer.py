@@ -25,6 +25,10 @@ from .errors import (
 )
 from .view import StringView
 
+from ...enums import Permissions
+from ...permissions import _effective_permissions
+from .errors import MissingPermissions
+
 Check = Callable[[Context], bool | Awaitable[bool]]
 
 
@@ -837,9 +841,6 @@ async def _check_fluxer_permissions(
     *,
     guild_only: bool = False,
 ) -> bool:
-    from ...enums import Permissions
-    from ...permissions import _effective_permissions
-    from .errors import MissingPermissions
 
     unknown = set(name for name in perms if name.upper() not in Permissions.__members__)
     if unknown:

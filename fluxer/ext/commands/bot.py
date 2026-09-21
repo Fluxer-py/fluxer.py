@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import logging
 import sys
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any, TypeGuard, cast
@@ -397,8 +398,6 @@ class Bot(GroupMixin, Client):
         Returns:
             None.
         """
-        import logging
-
         logging.getLogger(__name__).exception(
             "Ignoring exception in command %s", context.command, exc_info=exception
         )

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import aiohttp
+
 
 @dataclass(frozen=True, slots=True)
 class Asset:
@@ -27,8 +29,6 @@ class Asset:
         Raises:
             aiohttp.ClientError: The download fails or returns an HTTP error.
         """
-        import aiohttp
-
         async with aiohttp.ClientSession() as session:
             async with session.get(self.url) as response:
                 response.raise_for_status()

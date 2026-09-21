@@ -16,17 +16,18 @@ from typing import TYPE_CHECKING, Any
 from ..utils import process_embed_args
 
 from ..utils import snowflake_to_datetime
+from ..sticker import Sticker
+from .attachment import Attachment
+from .member import GuildMember
+from .reaction import Reaction
+from .user import User
 
 if TYPE_CHECKING:
-    from ..sticker import Sticker
     from ..file import File
     from ..http import HTTPClient
-    from .attachment import Attachment
-    from .member import GuildMember
     from .channel import Channel
     from .guild import Guild
-    from .reaction import PartialEmoji, Reaction
-    from .user import User
+    from .reaction import PartialEmoji
 
 
 @dataclass(slots=True)
@@ -319,12 +320,6 @@ class Message:
         Returns:
             A parsed Message instance.
         """
-        from ..sticker import Sticker
-        from .attachment import Attachment
-        from .member import GuildMember
-        from .reaction import Reaction
-        from .user import User
-
         author = User.from_data(data["author"], http)
         mentions = [User.from_data(u, http) for u in data.get("mentions", [])]
         attachments = [Attachment.from_data(a) for a in data.get("attachments", [])]
@@ -682,9 +677,7 @@ class Message:
         if self._http is None:
             raise RuntimeError("Message is not bound to an HTTP client")
 
-        from .user import User as UserModel
-
-        user_id = user.id if isinstance(user, UserModel) else user
+        user_id = user.id if isinstance(user, User) else user
         await self._http.delete_reaction(self.channel_id, self.id, emoji, user_id)
 
     async def clear_reactions(self) -> None:
@@ -766,8 +759,6 @@ class Message:
         Returns:
             The Reaction object that was added or updated
         """
-        from .reaction import Reaction
-
         # Find existing reaction with this emoji
         for reaction in self.reactions:
             if reaction.emoji == emoji:

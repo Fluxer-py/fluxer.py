@@ -7,12 +7,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-
+from .user import User
 
 if TYPE_CHECKING:
     from ..http import HTTPClient
     from .message import Message
-    from .user import User
 
 
 @dataclass(slots=True)
@@ -177,9 +176,7 @@ class Reaction:
         if not self._http or not self._message:
             raise RuntimeError("Cannot remove reaction without HTTPClient and Message")
 
-        from .user import User as UserModel
-
-        user_id = user.id if isinstance(user, UserModel) else user
+        user_id = user.id if isinstance(user, User) else user
         await self._http.delete_reaction(
             self._message.channel_id, self._message.id, self.emoji, user_id
         )

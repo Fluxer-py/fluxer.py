@@ -24,7 +24,7 @@ from ..utils import process_embed_args
 from .user import User
 
 from ..enums import ChannelType
-from ..fluxer_models import (
+from .search import (
     SearchAuthorType,
     SearchContentType,
     SearchEmbedType,
@@ -34,18 +34,18 @@ from ..fluxer_models import (
     parse_search_response,
 )
 from ..utils import snowflake_to_datetime
+from .message import Message, PartialMessage
+from ..invite import Invite
+from .member import GuildMember
+from .role import Role
 
 if TYPE_CHECKING:
-    from ..invite import Invite
     from ..client import Client
     from ..file import File
     from ..http import HTTPClient
     from ..voice import VoiceClient
     from .embed import Embed
     from .guild import Guild
-    from .member import GuildMember
-    from .message import Message, PartialMessage
-    from .role import Role
 
 
 class _TypingContext:
@@ -273,9 +273,6 @@ class Channel:
         target: Role | GuildMember | User | int,
         overwrite_type: PermissionOverwriteType | int | None,
     ) -> tuple[int, PermissionOverwriteType]:
-        from .member import GuildMember
-        from .role import Role
-
         guild = self._require_guild_context()
         explicit_type: PermissionOverwriteType | None = None
         if overwrite_type is not None:
@@ -356,8 +353,6 @@ class Channel:
             TypeError: The channel is private or the argument is unsupported.
             RuntimeError: Guild ownership, roles, or channel context is incomplete.
         """
-        from .member import GuildMember
-
         guild = self._require_guild_context()
         member: GuildMember | None
         if isinstance(member_or_user, GuildMember):
@@ -505,9 +500,6 @@ class Channel:
             embed = Embed(title="Title")
             await channel.send(embed=embed, file=File("data.json"))
         """
-        # Import here to avoid circular imports
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -544,8 +536,6 @@ class Channel:
         Returns:
             The fetched Message object.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -564,8 +554,6 @@ class Channel:
         Returns:
             A list of Message objects.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -585,8 +573,6 @@ class Channel:
         Returns:
             The requested partial message.
         """
-        from .message import PartialMessage
-
         return PartialMessage(
             channel_id=self.id,
             id=int(message_id),
@@ -614,8 +600,6 @@ class Channel:
         Yields:
             Each message from the requested page, bound to known channel and guild context.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -686,8 +670,6 @@ class Channel:
         Returns:
             A list of pinned Message objects.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -720,8 +702,6 @@ class Channel:
         Returns:
             The result of this operation.
         """
-        from ..invite import Invite
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
         data = await self._http.get_channel_invites(self.id)
@@ -736,8 +716,6 @@ class Channel:
         Returns:
             The result of this operation.
         """
-        from ..invite import Invite
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
         data = await self._http.create_channel_invite(self.id, **kwargs)

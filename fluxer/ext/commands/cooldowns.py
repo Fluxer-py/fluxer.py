@@ -10,6 +10,8 @@ import time
 from enum import Enum
 from typing import Any
 
+from .errors import MaxConcurrencyReached
+
 
 class BucketType(Enum):
     """Bucket Type data and behaviour.
@@ -271,8 +273,6 @@ class MaxConcurrency:
         key = self.get_key(message)
         sem = self._mapping.setdefault(key, asyncio.Semaphore(self.number))
         if not self.wait and sem.locked():
-            from .errors import MaxConcurrencyReached
-
             raise MaxConcurrencyReached("Maximum concurrency reached")
         await sem.acquire()
 

@@ -20,7 +20,7 @@ from .enums import Intents
 from ._types import UNSET, UnsetType
 from .errors import GatewayNotConnected
 from .events import fluxer_event_from_dispatch
-from .fluxer_models import (
+from .models.search import (
     SearchAuthorType,
     SearchContentType,
     SearchEmbedType,
@@ -35,6 +35,15 @@ from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webh
 from .models.role import Role
 from .models.member import GuildMember
 from .state import ConnectionState
+
+from .models.reaction import RawReactionActionEvent
+from .models.reaction import RawReactionClearEvent
+from .models.reaction import RawReactionClearEmojiEvent
+
+try:
+    from .voice import VoiceClient as _VoiceClientImpl
+except ImportError:
+    _VoiceClientImpl = None
 
 log = logging.getLogger(__name__)
 
@@ -675,8 +684,6 @@ class Client:
 
     async def _handle_reaction_add(self, data: dict[str, Any]) -> None:
         """Handle MESSAGE_REACTION_ADD event."""
-        from .models.reaction import RawReactionActionEvent
-
         raw = RawReactionActionEvent.from_data(data, "REACTION_ADD")
 
         message = self._state.get_message(raw.message_id)
@@ -688,8 +695,6 @@ class Client:
 
     async def _handle_reaction_remove(self, data: dict[str, Any]) -> None:
         """Handle MESSAGE_REACTION_REMOVE event."""
-        from .models.reaction import RawReactionActionEvent
-
         raw = RawReactionActionEvent.from_data(data, "REACTION_REMOVE")
 
         # Fire raw event (always fires, even if message not cached)
@@ -703,8 +708,6 @@ class Client:
 
     async def _handle_reaction_remove_all(self, data: dict[str, Any]) -> None:
         """Handle MESSAGE_REACTION_REMOVE_ALL event."""
-        from .models.reaction import RawReactionClearEvent
-
         raw = RawReactionClearEvent.from_data(data)
 
         # Fire raw event (always fires, even if message not cached)
@@ -715,8 +718,6 @@ class Client:
 
     async def _handle_reaction_remove_emoji(self, data: dict[str, Any]) -> None:
         """Handle MESSAGE_REACTION_REMOVE_EMOJI event."""
-        from .models.reaction import RawReactionClearEmojiEvent
-
         raw = RawReactionClearEmojiEvent.from_data(data)
 
         # Fire raw event (always fires, even if message not cached)
@@ -1078,7 +1079,8 @@ class Client:
         Note:
             Requires the `voice` extra: `pip install fluxer.py[voice]`.
         """
-        from .voice import VoiceClient
+        if _VoiceClientImpl is None:
+            raise ImportError("Voice extra not installed")
 
         if self._gateway is None:
             raise RuntimeError("Cannot join voice before connecting")
@@ -1089,7 +1091,7 @@ class Client:
             raise RuntimeError(
                 "A voice connection is already pending or active for this guild"
             )
-        vc = VoiceClient(guild_id, channel_id, self._gateway)
+        vc = _VoiceClientImpl(guild_id, channel_id, self._gateway)
         mutation_id = uuid.uuid4().hex
         self._pending_voice[guild_id] = vc
         self._voice_mutations[mutation_id] = vc
