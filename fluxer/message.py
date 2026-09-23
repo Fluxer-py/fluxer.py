@@ -10,6 +10,7 @@ from .models.message import (
     DeletedReferencedMessage,
     Message,
     MessageReference,
+    MessageSnapshot,
     PartialMessage,
 )
 
@@ -17,6 +18,7 @@ __all__ = (
     "Attachment",
     "Message",
     "MessageReference",
+    "MessageSnapshot",
     "DeletedReferencedMessage",
     "PartialMessage",
 )

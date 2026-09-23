@@ -5,6 +5,8 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+import asyncio
+
 import importlib
 import inspect
 import sys
@@ -403,11 +405,11 @@ class Bot(GroupMixin, Client):
             "Ignoring exception in command %s", context.command, exc_info=exception
         )
 
-    async def _dispatch(self, event_name: str, data: Any) -> None:
-        await super()._dispatch(event_name, data)
-        if event_name == "MESSAGE_CREATE":
-            message = self._parse_message(data)
-            await self.process_commands(message)
+    def _on_gateway_message(self, message: Message) -> None:
+        """Run commands independently of ordered Gateway cache updates."""
+        task = asyncio.create_task(self._run_event_handler("command", self.process_commands, message))
+        self._handler_tasks.add(task)
+        task.add_done_callback(self._handler_tasks.discard)
 
     async def add_cog(self, cog: Any) -> None:
         """Add cog.

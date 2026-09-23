@@ -5,6 +5,8 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+from ._model_factory import _snapshot
+
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, TypeVar
 
@@ -335,7 +337,7 @@ class SavedMessage:
         if isinstance(message_data, dict):
             from .models import Message
 
-            message = Message.from_data(message_data, http)
+            message = _snapshot(Message.from_data, message_data, http)
         return cls(
             id=_maybe_int(payload.get("id")),
             message_id=_maybe_int(
@@ -443,7 +445,7 @@ class Mention:
         if "content" in payload and "author" in payload:
             from .models import Message
 
-            message = Message.from_data(payload, http)
+            message = _snapshot(Message.from_data, payload, http)
         return cls(
             message=message,
             message_id=_maybe_int(payload.get("id") or payload.get("message_id")),
@@ -499,7 +501,7 @@ class Relationship:
         if isinstance(user_data, dict):
             from .models import User
 
-            user = User.from_data(user_data, http)
+            user = _snapshot(User.from_data, user_data, http)
         return cls(
             id=_maybe_int(payload.get("id")),
             user_id=_maybe_int(payload.get("user_id") or (user_data or {}).get("id")),
@@ -659,13 +661,13 @@ class SearchResult:
         raw_messages = data.get("messages", data.get("results", []))
         raw_channels = data.get("channels") or []
         channels = [
-            Channel.from_data(item, http)
+            _snapshot(Channel.from_data, item, http)
             for item in raw_channels
             if isinstance(item, dict)
         ]
         channels_by_id = {channel.id: channel for channel in channels}
         messages = [
-            Message.from_data(item.get("message", item), http)
+            _snapshot(Message.from_data, item.get("message", item), http)
             for item in raw_messages
             if isinstance(item, dict)
         ]
@@ -886,10 +888,10 @@ class GiftCode:
             else payload.get("redeemed_at") is not None,
             created_at=payload.get("created_at"),
             redeemed_at=payload.get("redeemed_at"),
-            created_by=User.from_data(created_by_data, http)
+            created_by=_snapshot(User.from_data, created_by_data, http)
             if isinstance(created_by_data, dict)
             else None,
-            redeemed_by=User.from_data(redeemed_by_data, http)
+            redeemed_by=_snapshot(User.from_data, redeemed_by_data, http)
             if isinstance(redeemed_by_data, dict)
             else None,
             raw_data=data,
@@ -1237,7 +1239,7 @@ class BanEntry:
         from .models import User
 
         return cls(
-            user=User.from_data(payload["user"], http),
+            user=_snapshot(User.from_data, payload["user"], http),
             reason=payload.get("reason"),
             moderator_id=_maybe_int(payload.get("moderator_id")),
             banned_at=payload.get("banned_at"),
@@ -1648,7 +1650,7 @@ class AppInfo:
         if isinstance(bot_data, dict):
             from .models import User
 
-            bot = User.from_data(bot_data, http)
+            bot = _snapshot(User.from_data, bot_data, http)
         team_data = payload.get("team")
         return cls(
             id=int(payload["id"]),
@@ -1658,7 +1660,7 @@ class AppInfo:
             bot_require_code_grant=bool(payload.get("bot_require_code_grant", False)),
             client_secret=payload.get("client_secret"),
             bot=bot,
-            _owner=User.from_data(payload["owner"], http)
+            _owner=_snapshot(User.from_data, payload["owner"], http)
             if payload.get("owner") is not None
             else None,
             team=Team.from_data(team_data, http)

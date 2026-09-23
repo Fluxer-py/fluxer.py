@@ -10,7 +10,7 @@ import json as json_mod
 import logging
 import math
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 import aiohttp
 from ._endpoints import Endpoints
@@ -35,6 +35,9 @@ from .fluxer_models import (
 __all__ = ("HTTPClient", "Route", "RateLimiter", "DEFAULT_API_URL")
 log = logging.getLogger(__name__)
 DEFAULT_API_URL = "https://api.fluxer.app/v1"
+
+if TYPE_CHECKING:
+    from .state import ConnectionState
 
 
 def _payload_value(value: Any) -> Any:
@@ -253,6 +256,8 @@ class HTTPClient:
         max_retries: Maximum retries after the initial attempt.
         retry_forever: Whether replayable transient failures have no retry ceiling.
     """
+
+    _state: ConnectionState | None = None
 
     def __init__(
         self,

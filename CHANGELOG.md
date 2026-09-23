@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.5.0-alpha.4] (development) - 2026-09-22
+
+### Added
+
+- Added `on_<gateway_event_name>_data` which listens to any gateway event and returns a raw data dict.
+- Added `on_reaction_add`
+- Added `Member.display_name` and `Member.display_avatar`
+- Added `Sticker` as a core import
+- Added `message.reference.resolved` to `Message` and `WebhookMessage`
+- Added typed wrappers that expose Fluxer’s documented bits for raw model flag integers
+- Parse forwarded-message snapshots into `list[MessageSnapshot]` on both `Message` and `WebhookMessage`
+
+### Fixed
+
+- Fixed `AttributeError: 'GuildMember' object has no attribute 'id'`
+
+### Changed
+
+- Improved caching for multiple objects.
+
+### Documentation
+
+- Added new entry
+- Updated general lib info.
+
 ## [0.5.0-alpha.3] (development) - 2026-09-18
 
 ### Added

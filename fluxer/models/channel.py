@@ -5,6 +5,8 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+from .._model_factory import _snapshot
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections.abc import AsyncIterator, Callable, Generator
@@ -36,6 +38,7 @@ from ..fluxer_models import (
 from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
+    from ..state import ConnectionState
     from ..invite import Invite
     from ..client import Client
     from ..file import File
@@ -133,6 +136,7 @@ class Channel:
     nicks: dict[str, str] = field(default_factory=dict)
     recipients: list[User] = field(default_factory=list)
 
+    _state: ConnectionState | None = field(default=None, repr=False, compare=False)
     _http: HTTPClient | None = field(default=None, repr=False)
     _guild: Guild | None = field(default=None, repr=False)
 
@@ -182,6 +186,7 @@ class Channel:
                 User.from_data(user, http) for user in data.get("recipients", [])
             ],
             _http=http,
+            _state=getattr(http, "_state", None),
         )
 
     @property
@@ -191,7 +196,9 @@ class Channel:
         Returns:
             The result of this operation.
         """
-        return self._guild
+        if self._guild is not None:
+            return self._guild
+        return self._state.guilds.get(self.guild_id) if self._state is not None and self.guild_id is not None else None
 
     @property
     def mention(self) -> str:
@@ -264,9 +271,10 @@ class Channel:
             raise TypeError(
                 "Permission overwrites are available only on guild channels"
             )
-        if self._guild is None:
+        guild = self.guild
+        if guild is None:
             raise RuntimeError("Channel is missing its bound guild context")
-        return self._guild
+        return guild
 
     def _resolve_overwrite_target(
         self,
@@ -350,11 +358,11 @@ class Channel:
 
         Returns:
             The effective 64-bit permission mask, or an empty mask for a user
-            who is not a known member of the guild.
+            established as a nonmember by a complete member cache.
 
         Raises:
             TypeError: The channel is private or the argument is unsupported.
-            RuntimeError: Guild ownership, roles, or channel context is incomplete.
+            RuntimeError: Required membership, ownership, roles, or channel context is incomplete.
         """
         from .member import GuildMember
 
@@ -365,15 +373,10 @@ class Channel:
                 return Permissions(0)
             member = member_or_user
         elif isinstance(member_or_user, User):
-            member = next(
-                (
-                    candidate
-                    for candidate in guild.members
-                    if candidate.user.id == member_or_user.id
-                ),
-                None,
-            )
+            member = guild.get_member(member_or_user.id)
             if member is None:
+                if not guild.member_cache_complete:
+                    raise RuntimeError("Guild member cache is incomplete; supply a GuildMember or request the full roster")
                 return Permissions(0)
         else:
             raise TypeError("permissions_for requires a GuildMember or User")
@@ -384,8 +387,7 @@ class Channel:
             return Permissions((1 << 64) - 1)
 
         required_role_ids = {guild.id, *member.roles}
-        known_role_ids = {role.id for role in guild.roles}
-        missing_role_ids = required_role_ids - known_role_ids
+        missing_role_ids = {role_id for role_id in required_role_ids if guild.get_role(role_id) is None}
         if missing_role_ids:
             missing = ", ".join(str(role_id) for role_id in sorted(missing_role_ids))
             raise RuntimeError(f"Guild role snapshot is incomplete; missing: {missing}")
@@ -393,7 +395,8 @@ class Channel:
         return _effective_permissions(
             {"id": guild.id, "owner_id": guild.owner_id},
             {"roles": member.roles},
-            [{"id": role.id, "permissions": role.permissions} for role in guild.roles],
+            [{"id": role.id, "permissions": role.permissions}
+             for role_id in required_role_ids if (role := guild.get_role(role_id)) is not None],
             member.user.id,
             {"permission_overwrites": self.permission_overwrites},
         )
@@ -530,9 +533,9 @@ class Channel:
             allowed_mentions=allowed_mentions,
             **combined_kwargs,
         )
-        msg = Message.from_data(data, self._http)
+        msg = _snapshot(Message.from_data, data, self._http)
         msg._channel = self
-        msg._cache_guild(self._guild)
+        msg._cache_guild(self.guild)
         return msg
 
     async def fetch_message(self, message_id: int | str) -> Message:
@@ -550,9 +553,9 @@ class Channel:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         data = await self._http.get_message(self.id, message_id)
-        msg = Message.from_data(data, self._http)
+        msg = _snapshot(Message.from_data, data, self._http)
         msg._channel = self
-        msg._cache_guild(self._guild)
+        msg._cache_guild(self.guild)
         return msg
 
     async def fetch_messages(self, limit: int = 50) -> list[Message]:
@@ -570,10 +573,10 @@ class Channel:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
         data = await self._http.get_messages(self.id, limit=limit)
-        msgs = [Message.from_data(msg_data, self._http) for msg_data in data]
+        msgs = [_snapshot(Message.from_data, msg_data, self._http) for msg_data in data]
         for msg in msgs:
             msg._channel = self
-            msg._cache_guild(self._guild)
+            msg._cache_guild(self.guild)
         return msgs
 
     def get_partial_message(self, message_id: int | str) -> PartialMessage:
@@ -592,7 +595,7 @@ class Channel:
             id=int(message_id),
             _http=self._http,
             _channel=self,
-            _guild=self._guild,
+            _guild=self.guild,
         )
 
     async def history(
@@ -627,9 +630,9 @@ class Channel:
             around=around,
         )
         for msg_data in data:
-            msg = Message.from_data(msg_data, self._http)
+            msg = _snapshot(Message.from_data, msg_data, self._http)
             msg._channel = self
-            msg._cache_guild(self._guild)
+            msg._cache_guild(self.guild)
             yield msg
 
     async def purge(
@@ -693,12 +696,12 @@ class Channel:
 
         data = await self._http.get_pinned_messages(self.id, limit=limit, before=before)
         msgs = [
-            Message.from_data(msg_data.get("message", msg_data), self._http)
+            _snapshot(Message.from_data, msg_data.get("message", msg_data), self._http)
             for msg_data in data["items"]
         ]
         for msg in msgs:
             msg._channel = self
-            msg._guild = self._guild
+            msg._guild = self.guild
         return msgs
 
     async def ack_pins(self) -> None:

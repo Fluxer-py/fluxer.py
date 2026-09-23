@@ -121,6 +121,7 @@ class Gateway:
         token: str,
         intents: Intents,
         dispatch: Callable[[str, Any], Coroutine[Any, Any, None]],
+        on_disconnect: Callable[[], None] | None = None,
     ) -> None:
         """Initialize the gateway with the supplied configuration.
 
@@ -129,11 +130,13 @@ class Gateway:
             token: Caller-supplied credential or webhook capability; keep this value secret.
             intents: Deprecated compatibility mask; Fluxer does not use intents to filter events.
             dispatch: Dispatch used by this operation.
+            on_disconnect: Internal callback invalidating non-replayable cache requests.
         """
         self._http = http_client
         self._token = token
         self._intents = intents
         self._dispatch = dispatch
+        self._on_disconnect = on_disconnect
 
         # Connection state
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -226,6 +229,8 @@ class Gateway:
             await self._event_loop()
         finally:
             self._disconnected_at = asyncio.get_running_loop().time()
+            if self._on_disconnect is not None:
+                self._on_disconnect()
             if self._dispatch_task is not None:
                 self._dispatch_task.cancel()
                 await asyncio.gather(self._dispatch_task, return_exceptions=True)

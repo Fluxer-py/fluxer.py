@@ -19,6 +19,9 @@ Core components:
 - `fluxer.ext.tasks` -- Reusable background task loops
 - `VoiceClient` -- Optional voice connection and playback support
 
+See [Caching and live state](caching.md) for retention settings, read-only guild
+collections, incomplete membership, HTTP snapshots, and command execution.
+
 ---
 
 # Data Models
@@ -55,6 +58,50 @@ such as:
 - `Guild.fetch_member()`
 - `Guild.ban()`
 - `Webhook.send()`
+
+For guild members, `member.display_name` chooses the guild nickname when one
+is set, then the account's global name or username. `member.display_avatar`
+chooses the guild avatar, then the account avatar, then its generated default
+avatar. The avatar property returns a URL using the member's initialized
+client service endpoints.
+
+Messages and webhook messages expose reply or forward metadata through
+`message.reference`. When present, it is the same object as
+`message.message_reference`; `message.reference.resolved` contains the referenced
+`Message`, a `DeletedReferencedMessage` placeholder, or `None` when unresolved.
+The existing `message.referenced_message` field remains available. Accessing
+`reference` does not fetch a message or change the reference's wire payload.
+
+Forwarded messages expose `message.message_snapshots` as a list of
+`MessageSnapshot` objects; webhook messages use the same model. Each snapshot
+has the original `timestamp` string and a `created_at` datetime, plus optional
+`edited_timestamp` and `edited_at`. `mentions` and `mention_roles` contain
+integer IDs. `attachments` and `stickers` are parsed models, `flags` is a
+`MessageFlags` mask, and `embeds` and `mention_channels` remain dictionaries.
+Optional collections are empty when omitted. `raw_data` retains the original
+snapshot fields, including fields without typed properties. A snapshot contains
+only the fields supplied by Fluxer; it does not resolve a source message.
+
+## Message and attachment flags
+
+`Message.flags` and `WebhookMessage.flags` expose `MessageFlags`. The boolean
+properties `suppress_embeds`, `suppress_notifications`, and `voice_message`
+correspond to Fluxer's documented message bits. Attachments expose
+`AttachmentFlags` with `is_spoiler`, `contains_explicit_media`, and
+`is_animated`. `Attachment.is_spoiler()` checks the spoiler bit directly:
+
+```py
+if message.flags.suppress_embeds:
+    print("Embeds are hidden")
+
+for attachment in message.attachments:
+    if attachment.is_spoiler():
+        print("Spoiler attachment:", attachment.filename)
+```
+
+Use `int(model.flags)` or `model.flags.value` to read the complete mask,
+including bits without named properties. Attachment payload serialization
+still writes an integer mask.
 
 ---
 

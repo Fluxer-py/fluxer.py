@@ -5,6 +5,8 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+from ._model_factory import _snapshot
+
 import asyncio
 import logging
 import warnings
@@ -19,7 +21,6 @@ if TYPE_CHECKING:
 from .enums import Intents
 from ._types import UNSET, UnsetType
 from .errors import GatewayNotConnected
-from .events import fluxer_event_from_dispatch
 from .fluxer_models import (
     SearchAuthorType,
     SearchContentType,
@@ -32,7 +33,6 @@ from .fluxer_models import (
 from .gateway import Gateway
 from .http import HTTPClient
 from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webhook
-from .models.role import Role
 from .models.member import GuildMember
 from .state import ConnectionState
 
@@ -68,6 +68,7 @@ class Client:
         retry_forever: bool = False,
         max_messages: int = 1000,
         cache_members: bool = True,
+        max_private_channels: int | None | UnsetType = UNSET,
     ) -> None:
         """Initialize the client with the supplied configuration.
 
@@ -78,7 +79,8 @@ class Client:
             max_retries: Maximum retries after the initial request; zero disables retries.
             retry_forever: Whether replayable transient failures may retry without a ceiling.
             max_messages: Max messages used by this operation.
-            cache_members: Cache members used by this operation.
+            cache_members: Whether guilds retain member objects.
+            max_private_channels: Private-channel bound; defaults to 128 for bots and unlimited for user accounts. None disables the bound.
         """
         if intents is not None:
             warnings.warn(
@@ -93,15 +95,15 @@ class Client:
         self._gateway: Gateway | None = None
         self._event_handlers: dict[str, list[EventHandler]] = {}
         self._handler_tasks: set[asyncio.Task[None]] = set()
-        self._user: User | None = None
-        self._users: dict[int, User] = {}
         self._state = ConnectionState(
-            max_messages=max_messages, cache_members=cache_members
+            max_messages=max_messages, cache_members=cache_members,
+            max_private_channels=max_private_channels,
         )
         self._guilds = self._state.guilds
         self._channels = self._state.channels
         self._voice_states = self._state.voice_states
-        self._voice_tombstones: dict[tuple[int, int, str | None], VoiceState] = {}
+        self._users = self._state.users
+        self._voice_tombstones = self._state._voice_tombstones
         self._pending_voice: dict[int, VoiceClient] = {}
         self._active_voice: dict[int, VoiceClient] = {}
         self._voice_mutations: dict[str, VoiceClient] = {}
@@ -112,6 +114,14 @@ class Client:
         ] = {}
         self._max_retries = max_retries
         self._retry_forever = retry_forever
+
+    @property
+    def _user(self) -> User | None:
+        return self._state.user
+
+    @_user.setter
+    def _user(self, value: User | None) -> None:
+        self._state.user = value
 
     @property
     def user(self) -> User | None:
@@ -221,7 +231,7 @@ class Client:
             The requested channel, or None when no matching value is available.
         """
         try:
-            return self._channels.get(int(id))
+            return self._state.get_channel(int(id))
         except (TypeError, ValueError):
             return None
 
@@ -398,146 +408,35 @@ class Client:
         1. Parses the raw data into model objects
         2. Updates internal caches
         3. Fires matching user event handlers
+        4. Fires ``on_<gateway_event_name>_data`` with the original payload
         """
-        # Map gateway event names to handler names and parse data
+        try:
+            await self._dispatch_modeled(event_name, data)
+        finally:
+            await self._fire(f"on_{event_name.lower()}_data", data)
+
+    async def _dispatch_modeled(self, event_name: str, data: Any) -> None:
+        """Apply state updates before delivering public callbacks."""
+        self._state.http = self._http
+        if self._http is not None:
+            self._http._state = self._state
+        if event_name in ("VOICE_SERVER_UPDATE", "VOICE_STATE_ACK"):
+            await self._dispatch_voice_control(event_name, data)
+            return
+        events = self._state._parse_dispatch(event_name, data)
+        if event_name == "READY":
+            self._ready.set()
+        for name, args in events:
+            await self._fire(name, *args)
+            if name == "on_message":
+                self._on_gateway_message(args[0])
+
+    def _on_gateway_message(self, message: Message) -> None:
+        """Allow command clients to consume the already parsed message."""
+
+    async def _dispatch_voice_control(self, event_name: str, data: Any) -> None:
+        """Deliver voice transport control outside the entity cache."""
         match event_name:
-            case "READY":
-                self._state.guilds.clear()
-                self._state.channels.clear()
-                self._state.members.clear()
-                self._state.messages.clear()
-                self._state.voice_states.clear()
-                self._voice_tombstones.clear()
-                self._user = User.from_data(data["user"], self._http)
-                self._users = {
-                    int(u["id"]): User.from_data(u, self._http)
-                    for u in data.get("users", [])
-                }
-                self._users[self._user.id] = self._user
-                if self._http is not None:
-                    self._http._user_id = self._user.id
-                # Process guilds from READY
-                for guild_data in data.get("guilds", []):
-                    guild = Guild.from_data(guild_data, self._http)
-                    self._state.store_guild(guild)
-                    for channel in guild.channels:
-                        self._state.store_channel(channel)
-                    for member_data in guild_data.get("members", []):
-                        self._store_member(member_data, guild.id)
-                    self._seed_guild_voice_states(
-                        guild.id, guild_data.get("voice_states", [])
-                    )
-                for channel_data in data.get("private_channels", []):
-                    self._state.store_channel(
-                        Channel.from_data(channel_data, self._http)
-                    )
-                self._ready.set()
-                await self._fire("on_ready")
-
-            case "MESSAGE_CREATE":
-                message = self._parse_message(data)
-                await self._fire("on_message", message)
-
-            case "MESSAGE_UPDATE":
-                message = self._parse_message(data)
-                await self._fire("on_message_edit", message)
-
-            case "MESSAGE_DELETE":
-                self._state.remove_message(data["id"])
-                await self._fire("on_message_delete", data)
-
-            case "MESSAGE_DELETE_BULK":
-                for message_id in data.get("ids", []):
-                    self._state.remove_message(message_id)
-                await self._fire("on_message_delete_bulk", data)
-
-            case "GUILD_CREATE" | "GUILD_SYNC" | "GUILD_UPDATE":
-                guild = self._replace_guild_snapshot(data)
-                if event_name == "GUILD_CREATE":
-                    await self._fire("on_guild_join", guild)
-                else:
-                    await self._fire(f"on_{event_name.lower()}", data)
-                    await self._fire(
-                        "on_fluxer_event", fluxer_event_from_dispatch(event_name, data)
-                    )
-
-            case "GUILD_DELETE":
-                guild_id = int(data["id"])
-                guild = self._guilds.get(guild_id)
-                if data.get("unavailable", False):
-                    if guild is None:
-                        guild = Guild.from_data(data, self._http)
-                        self._state.store_guild(guild)
-                    guild.unavailable = True
-                else:
-                    self._guilds.pop(guild_id, None)
-                    for channel_id in [
-                        key
-                        for key, ch in self._channels.items()
-                        if ch.guild_id == guild_id
-                    ]:
-                        self._channels.pop(channel_id)
-                    for key in [
-                        key for key in self._state.members if key[0] == guild_id
-                    ]:
-                        self._state.members.pop(key)
-                    for message_id, message in list(self._state.messages.items()):
-                        if message.guild_id == guild_id:
-                            self._state.remove_message(message_id)
-                    self._voice_states.pop(guild_id, None)
-                    self._clear_voice_tombstones(guild_id)
-                await self._fire("on_guild_remove", guild or data)
-
-            case "GUILD_MEMBER_ADD":
-                self._store_member(data, int(data["guild_id"]))
-                await self._fire("on_member_join", data)
-
-            case "GUILD_MEMBER_REMOVE":
-                self._state.members.pop(
-                    (int(data["guild_id"]), int(data["user"]["id"])), None
-                )
-                await self._fire("on_member_remove", data)
-
-            case "GUILD_MEMBER_UPDATE":
-                self._store_member(data, int(data["guild_id"]))
-                await self._fire("on_guild_member_update", data)
-
-            case "GUILD_MEMBERS_CHUNK":
-                for member_data in data.get("members", []):
-                    self._store_member(member_data, int(data["guild_id"]))
-                await self._fire("on_guild_members_chunk", data)
-
-            case "CHANNEL_CREATE":
-                channel = Channel.from_data(data, self._http)
-                if channel.guild_id is not None:
-                    channel._guild = self._guilds.get(channel.guild_id)
-                self._state.store_channel(channel)
-                await self._fire("on_channel_create", channel)
-
-            case "CHANNEL_UPDATE":
-                channel = Channel.from_data(data, self._http)
-                if channel.guild_id is not None:
-                    channel._guild = self._guilds.get(channel.guild_id)
-                self._state.store_channel(channel)
-                await self._fire("on_channel_update", channel)
-
-            case "CHANNEL_DELETE":
-                # CHANNEL_DELETE only provides minimal data (guild_id, id)
-                # Try to get the full channel from cache before removing it
-                channel_id = int(data["id"])
-                channel = self._channels.pop(channel_id, None)
-
-                if channel:
-                    # We have the full channel object from cache
-                    await self._fire("on_channel_delete", channel)
-                else:
-                    # Channel wasn't cached, fire event with raw data
-                    await self._fire("on_channel_delete", data)
-
-            case "VOICE_STATE_UPDATE":
-                voice_state = self._store_voice_state(data)
-                await self._fire("on_voice_state_update", voice_state)
-
             case "VOICE_SERVER_UPDATE":
                 if data.get("guild_id") is None:
                     return
@@ -565,165 +464,18 @@ class Client:
                     )
                 await self._fire("on_voice_state_ack", data)
 
-            case "RESUMED":
-                await self._fire("on_resumed")
-
-            case "MESSAGE_REACTION_ADD":
-                await self._handle_reaction_add(data)
-
-            case "MESSAGE_REACTION_REMOVE":
-                await self._handle_reaction_remove(data)
-
-            case "MESSAGE_REACTION_REMOVE_ALL":
-                await self._handle_reaction_remove_all(data)
-
-            case "MESSAGE_REACTION_REMOVE_EMOJI":
-                await self._handle_reaction_remove_emoji(data)
-
-            case "CHANNEL_UPDATE_BULK":
-                for channel_data in data.get("channels", []):
-                    channel = Channel.from_data(channel_data, self._http)
-                    if channel.guild_id is not None:
-                        channel._guild = self._guilds.get(channel.guild_id)
-                    self._state.store_channel(channel)
-                await self._fire(
-                    "on_fluxer_event", fluxer_event_from_dispatch(event_name, data)
-                )
-
-            case "GUILD_ROLE_UPDATE_BULK":
-                guild_id = int(data["guild_id"])
-                guild = self._guilds.get(guild_id)
-                if guild is not None:
-                    roles = {role.id: role for role in guild.roles}
-                    for role_data in data.get("roles", []):
-                        role = Role.from_data(role_data, self._http, guild_id)
-                        roles[role.id] = role
-                    guild.roles = list(roles.values())
-                await self._fire(
-                    "on_fluxer_event", fluxer_event_from_dispatch(event_name, data)
-                )
-
-            case _:
-                # Unknown/unhandled event — fire a generic handler
-                handler_name = f"on_{event_name.lower()}"
-                await self._fire(handler_name, data)
-                await self._fire(
-                    "on_fluxer_event", fluxer_event_from_dispatch(event_name, data)
-                )
 
     def _replace_guild_snapshot(self, data: dict[str, Any]) -> Guild:
-        """Replace supplied guild collections and rebind retained cache entries."""
-        guild = Guild.from_data(data, self._http)
-        previous = self._guilds.get(guild.id)
-        if previous is not None:
-            for name in ("roles", "channels", "members", "emojis", "stickers"):
-                if name not in data:
-                    setattr(guild, name, getattr(previous, name))
-        self._state.store_guild(guild)
-        if "channels" in data:
-            for channel_id, channel in list(self._channels.items()):
-                if channel.guild_id == guild.id:
-                    self._channels.pop(channel_id)
-            for channel in guild.channels:
-                self._state.store_channel(channel)
-        for channel in self._channels.values():
-            if channel.guild_id == guild.id:
-                channel._guild = guild
-        if "members" in data:
-            for key in list(self._state.members):
-                if key[0] == guild.id:
-                    self._state.members.pop(key)
-            guild.members = [
-                self._store_member(item, guild.id) for item in data["members"]
-            ]
-        if "voice_states" in data:
-            self._voice_states.pop(guild.id, None)
-            self._clear_voice_tombstones(guild.id)
-            self._seed_guild_voice_states(guild.id, data["voice_states"])
-        for message in self._state.messages.values():
-            if message.guild_id == guild.id:
-                message._cache_guild(guild)
-                message._channel = self._channels.get(message.channel_id)
-        return guild
+        """Delegate a live guild snapshot to the state owner."""
+        return self._state._guild_snapshot(data)
 
     def _store_member(self, data: dict[str, Any], guild_id: int) -> GuildMember:
-        member = GuildMember.from_data(data, self._http, guild_id=guild_id)
-        if not member.user.username and member.user.id in self._users:
-            member.user = self._users[member.user.id]
-        else:
-            self._users[member.user.id] = member.user
-        return self._state.store_member(member)
+        """Delegate live membership hydration to the state owner."""
+        return self._state._member(data, guild_id)
 
     def _parse_message(self, data: dict[str, Any]) -> Message:
-        """Parse message data and attach cached channel and guild references."""
-        msg = Message.from_data(data, self._http)
-        # Attach cached channel
-        cached_channel = self._channels.get(msg.channel_id)
-        if cached_channel:
-            msg._channel = cached_channel
-        # Resolve guild_id via channel if not present in message data
-        guild_id = msg.guild_id or (cached_channel.guild_id if cached_channel else None)
-        if guild_id is not None:
-            cached_guild = self._guilds.get(guild_id)
-            if cached_guild:
-                msg._cache_guild(cached_guild)
-        if data.get("member") is not None and guild_id is not None:
-            msg.member = self._store_member(
-                {**data["member"], "user": data["author"]}, guild_id
-            )
-        return self._state.store_message(msg)
-
-    async def _handle_reaction_add(self, data: dict[str, Any]) -> None:
-        """Handle MESSAGE_REACTION_ADD event."""
-        from .models.reaction import RawReactionActionEvent
-
-        raw = RawReactionActionEvent.from_data(data, "REACTION_ADD")
-
-        message = self._state.get_message(raw.message_id)
-        if message is not None:
-            reaction = message._add_reaction(data, raw.emoji, raw.user_id)
-            if self.user is not None and raw.user_id == self.user.id:
-                reaction.me = True
-        await self._fire("on_raw_reaction_add", raw)
-
-    async def _handle_reaction_remove(self, data: dict[str, Any]) -> None:
-        """Handle MESSAGE_REACTION_REMOVE event."""
-        from .models.reaction import RawReactionActionEvent
-
-        raw = RawReactionActionEvent.from_data(data, "REACTION_REMOVE")
-
-        # Fire raw event (always fires, even if message not cached)
-        message = self._state.get_message(raw.message_id)
-        if message is not None:
-            try:
-                message._remove_reaction(data, raw.emoji, raw.user_id)
-            except ValueError:
-                pass
-        await self._fire("on_raw_reaction_remove", raw)
-
-    async def _handle_reaction_remove_all(self, data: dict[str, Any]) -> None:
-        """Handle MESSAGE_REACTION_REMOVE_ALL event."""
-        from .models.reaction import RawReactionClearEvent
-
-        raw = RawReactionClearEvent.from_data(data)
-
-        # Fire raw event (always fires, even if message not cached)
-        message = self._state.get_message(raw.message_id)
-        if message is not None:
-            message.reactions.clear()
-        await self._fire("on_raw_reaction_clear", raw)
-
-    async def _handle_reaction_remove_emoji(self, data: dict[str, Any]) -> None:
-        """Handle MESSAGE_REACTION_REMOVE_EMOJI event."""
-        from .models.reaction import RawReactionClearEmojiEvent
-
-        raw = RawReactionClearEmojiEvent.from_data(data)
-
-        # Fire raw event (always fires, even if message not cached)
-        message = self._state.get_message(raw.message_id)
-        if message is not None:
-            message._clear_emoji(raw.emoji)
-        await self._fire("on_raw_reaction_clear_emoji", raw)
+        """Parse a live message through the state owner."""
+        return self._state.store_message(Message.from_data(data, self._http))
 
     async def _fire(self, event_name: str, *args: Any) -> None:
         """Fire all registered handlers for an event."""
@@ -779,9 +531,9 @@ class Client:
         """
         assert self._http is not None
         data = await self._http.get_channel(channel_id)
-        ch = Channel.from_data(data, self._http)
-        self._state.store_channel(ch)
-        return ch
+        channel = _snapshot(Channel.from_data, data, self._http)
+        channel._state = self._state
+        return channel
 
     async def fetch_message(self, channel_id: str, message_id: str) -> Message:
         """Fetch a message from the API by channel ID and message ID.
@@ -795,7 +547,9 @@ class Client:
         """
         assert self._http is not None
         data = await self._http.get_message(channel_id, message_id)
-        return self._parse_message(data)
+        message = _snapshot(Message.from_data, data, self._http)
+        message._state = self._state
+        return message
 
     async def search_messages(
         self,
@@ -956,9 +710,7 @@ class Client:
         """
         assert self._http is not None
         data = await self._http.get_guild(guild_id)
-        guild = Guild.from_data(data, self._http)
-        self._state.store_guild(guild)
-        return guild
+        return _snapshot(Guild.from_data, data, self._http)
 
     async def fetch_user(self, user_id: str) -> User:
         """Fetch a user from the API.
@@ -971,7 +723,7 @@ class Client:
         """
         assert self._http is not None
         data = await self._http.get_user(user_id)
-        return User.from_data(data, self._http)
+        return _snapshot(User.from_data, data, self._http)
 
     async def fetch_user_profile(
         self, user_id: str, *, guild_id: str | None = None
@@ -1122,11 +874,7 @@ class Client:
         Returns:
             The requested voice state, or None when no matching value is available.
         """
-        guild_states = self._voice_states.get(int(guild_id), {})
-        for (cached_user_id, _connection_id), state in guild_states.items():
-            if cached_user_id == int(user_id):
-                return state
-        return None
+        return next(iter(self._state._voice_users.get((int(guild_id), int(user_id)), {}).values()), None)
 
     def get_guild_voice_states(self, guild_id: int) -> list[VoiceState]:
         """Return all cached voice states for a guild.
@@ -1148,13 +896,7 @@ class Client:
         Returns:
             The requested channel voice states.
         """
-        target_channel_id = int(channel_id)
-        return [
-            state
-            for guild_states in self._voice_states.values()
-            for state in guild_states.values()
-            if state.channel_id == target_channel_id
-        ]
+        return list(self._state._voice_channels.get(int(channel_id), {}).values())
 
     def get_channel_voice_user_count(self, channel_id: int | str) -> int:
         """Return the cached unique-user count for a voice channel.
@@ -1173,46 +915,19 @@ class Client:
         assert voice_state.user_id is not None
         return (voice_state.user_id, voice_state.connection_id)
 
-    def _seed_guild_voice_states(
-        self, guild_id: int, voice_states: list[dict[str, Any]]
-    ) -> None:
-        for voice_state_data in voice_states:
-            payload = {
-                **voice_state_data,
-                "guild_id": voice_state_data.get("guild_id", guild_id),
-            }
-            self._store_voice_state(payload)
+    def _seed_guild_voice_states(self, guild_id: int, voice_states: list[dict[str, Any]]) -> None:
+        """Seed voice entries through the state owner."""
+        for data in voice_states:
+            self._state._store_voice_state({**data, "guild_id": str(guild_id)})
 
     def _clear_voice_tombstones(self, guild_id: int) -> None:
-        for key in list(self._voice_tombstones):
-            if key[0] == guild_id:
-                self._voice_tombstones.pop(key)
+        """Discard departure versions for a replaced guild snapshot."""
+        self._state._clear_voice_tombstones(guild_id)
 
     def _store_voice_state(self, data: dict[str, Any]) -> VoiceState:
-        voice_state = VoiceState.from_data(data, self._http)
-        if voice_state.guild_id is not None and voice_state.user_id is not None:
-            guild_states = self._voice_states.setdefault(voice_state.guild_id, {})
-            key = self._voice_state_key(voice_state)
-            tombstone_key = (voice_state.guild_id, *key)
-            previous = guild_states.get(key) or self._voice_tombstones.get(
-                tombstone_key
-            )
-            if (
-                previous is not None
-                and previous.version is not None
-                and voice_state.version is not None
-                and voice_state.version < previous.version
-            ):
-                return previous
-            if voice_state.channel_id is None:
-                guild_states.pop(key, None)
-                self._voice_tombstones[tombstone_key] = voice_state
-                if len(self._voice_tombstones) > 2048:
-                    self._voice_tombstones.pop(next(iter(self._voice_tombstones)))
-            else:
-                self._voice_tombstones.pop(tombstone_key, None)
-                guild_states[key] = voice_state
-        return voice_state
+        """Delegate versioned voice state to the state owner."""
+        self._state.http = self._http
+        return self._state._store_voice_state(data)
 
     # =========================================================================
     # Reaction methods
@@ -1360,14 +1075,17 @@ class Client:
         Returns:
             None.
         """
-        await self._require_gateway().request_guild_members(
-            guild_id=guild_id,
-            query=query,
-            limit=limit,
-            presences=presences,
-            user_ids=user_ids,
-            nonce=nonce,
-        )
+        gateway = self._require_gateway()
+        nonce = nonce if nonce is not None else uuid.uuid4().hex
+        self._state._track_member_request(int(guild_id), nonce, not query and limit == 0 and not user_ids)
+        try:
+            await gateway.request_guild_members(
+                guild_id=guild_id, query=query, limit=limit,
+                presences=presences, user_ids=user_ids, nonce=nonce,
+            )
+        except BaseException:
+            self._state._cancel_member_request(int(guild_id), nonce)
+            raise
 
     async def request_lazy_members(
         self,
@@ -1394,6 +1112,8 @@ class Client:
             channels=channels,
             **({"channel_id": channel_id} if channel_id is not None else {}),
         )
+        selected = channels or ({str(channel_id): ranges} if channel_id is not None else {})
+        self._state._track_member_ranges(int(guild_id), selected, ranges)
 
     async def request_guild_counts(self, guild_ids: list[int | str]) -> None:
         """Request member/guild statistics through the Fluxer Gateway.
@@ -1459,11 +1179,13 @@ class Client:
 
         self._state.http = self._http
 
+        self._http._state = self._state
         self._gateway = Gateway(
             http_client=self._http,
             token=token,
             intents=self.intents,
             dispatch=self._dispatch,
+            on_disconnect=self._state._interrupt,
         )
 
         try:
@@ -1490,17 +1212,24 @@ class Client:
         ]
         for task in handlers:
             task.cancel()
-        await asyncio.gather(*handlers, return_exceptions=True)
-        for vc in set(self._pending_voice.values()) | set(self._active_voice.values()):
-            vc._reject_placement("Client closed during voice placement")
-            await vc.disconnect()
-        self._pending_voice.clear()
-        self._active_voice.clear()
-        self._voice_mutations.clear()
-        if self._gateway:
-            await self._gateway.close()
-        if self._http:
-            await self._http.close()
+        try:
+            await asyncio.gather(*handlers, return_exceptions=True)
+            for vc in set(self._pending_voice.values()) | set(self._active_voice.values()):
+                vc._reject_placement("Client closed during voice placement")
+                await vc.disconnect()
+        finally:
+            self._pending_voice.clear()
+            self._active_voice.clear()
+            self._voice_mutations.clear()
+            try:
+                if self._gateway:
+                    await self._gateway.close()
+            finally:
+                try:
+                    if self._http:
+                        await self._http.close()
+                finally:
+                    self._state.clear()
 
     def run(self, token: str) -> None:
         """Blocking call that connects to Fluxer and runs the bot.

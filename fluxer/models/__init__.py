@@ -9,7 +9,7 @@ from .embed import Embed
 from .emoji import Emoji
 from .guild import Guild
 from .member import GuildMember
-from .message import DeletedReferencedMessage, Message, MessageReference, PartialMessage
+from .message import DeletedReferencedMessage, Message, MessageReference, MessageSnapshot, PartialMessage
 from .profile import UserProfile
 from .reaction import (
     PartialEmoji,
@@ -32,6 +32,7 @@ __all__ = [
     "GuildMember",
     "Message",
     "MessageReference",
+    "MessageSnapshot",
     "DeletedReferencedMessage",
     "PartialMessage",
     "PartialEmoji",

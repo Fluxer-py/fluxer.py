@@ -167,13 +167,16 @@ def test_effective_permissions_and_overwrite_inspection() -> None:
     assert channel.overwrites_for(
         999, type=fluxer.PermissionOverwriteType.MEMBER
     ).is_empty()
+    with pytest.raises(RuntimeError, match="member cache is incomplete"):
+        channel.permissions_for(fluxer.User(id=999))
+    guild._member_cache_complete = True
     assert channel.permissions_for(fluxer.User(id=999)) == fluxer.Permissions(0)
 
 
 def test_effective_permissions_require_complete_guild_cache() -> None:
     guild = permission_guild()
     channel = guild.channels[0]
-    guild.roles = [role for role in guild.roles if role.id != 20]
+    guild._roles.pop(20)
     with pytest.raises(RuntimeError, match="role snapshot is incomplete"):
         channel.permissions_for(guild.members[1])
     with pytest.raises(TypeError, match="only on guild channels"):

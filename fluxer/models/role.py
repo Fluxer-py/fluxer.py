@@ -5,6 +5,8 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+from .._model_factory import _snapshot
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -154,7 +156,7 @@ class Role:
             reason=reason,
             **extra,
         )
-        return Role.from_data(data, self._http, self.guild_id)
+        return _snapshot(Role.from_data, data, self._http, self.guild_id)
 
     async def delete(self, *, reason: str | None = None) -> None:
         """Delete this role.

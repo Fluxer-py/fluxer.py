@@ -5,9 +5,12 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+from .._model_factory import _snapshot
+
 from .._endpoints import asset_url
 
 from .._types import UNSET, UnsetType
+from ..flags import MessageFlags
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -18,6 +21,7 @@ from ..utils import process_embed_args
 from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
+    from ..state import ConnectionState
     from ..sticker import Sticker
     from ..file import File
     from ..http import HTTPClient
@@ -40,6 +44,7 @@ class MessageReference:
         type: Type used by this operation.
         attachment_ids: IDs of the attachment resources selected by this operation.
         embed_indices: Embed indices used by this operation.
+        resolved: Referenced message, deleted-message placeholder, or None.
     """
 
     message_id: int
@@ -48,6 +53,22 @@ class MessageReference:
     type: int | None = None
     attachment_ids: list[int] | None = None
     embed_indices: list[int] | None = None
+    _resolved: Message | DeletedReferencedMessage | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    @property
+    def resolved(self) -> Message | DeletedReferencedMessage | None:
+        """Return the resolved message or a deleted-message placeholder.
+
+        Returns:
+            The referenced message when available, otherwise None.
+        """
+        return self._resolved
+
+    def _bind_resolved(self, value: Message | DeletedReferencedMessage | None) -> None:
+        """Set the resolved value from the message that owns this reference."""
+        self._resolved = value
 
     @classmethod
     def from_data(cls, data: dict[str, Any]) -> MessageReference:
@@ -124,6 +145,96 @@ class DeletedReferencedMessage:
 
 
 @dataclass(slots=True)
+class MessageSnapshot:
+    """A forwarded message snapshot from Fluxer's flat payload.
+
+    Attributes:
+        timestamp: Original creation timestamp string.
+        content: Message text, empty when absent.
+        edited_timestamp: Original edit timestamp string, when present.
+        type: Message type value.
+        flags: Message flags, including any unnamed bits.
+        mentions: IDs of mentioned users.
+        mention_roles: IDs of mentioned roles.
+        mention_channels: Channel mention payloads.
+        embeds: Embed payloads.
+        attachments: Parsed message attachments.
+        stickers: Parsed stickers.
+        raw_data: Original snapshot fields, including unmodeled fields.
+        created_at: Creation timestamp as a datetime.
+        edited_at: Edit timestamp as a datetime, when present.
+    """
+
+    timestamp: str
+    content: str = ""
+    edited_timestamp: str | None = None
+    type: int = 0
+    flags: MessageFlags = field(default_factory=MessageFlags)
+    mentions: list[int] = field(default_factory=list)
+    mention_roles: list[int] = field(default_factory=list)
+    mention_channels: list[dict[str, Any]] = field(default_factory=list)
+    embeds: list[dict[str, Any]] = field(default_factory=list)
+    attachments: list[Attachment] = field(default_factory=list)
+    stickers: list[Sticker] = field(default_factory=list)
+    raw_data: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self) -> None:
+        """Normalize an integer flag mask supplied to the constructor."""
+        self.flags = MessageFlags(self.flags)
+
+    @property
+    def created_at(self) -> datetime:
+        """Return the creation timestamp as a datetime.
+
+        Returns:
+            The creation time represented by ``timestamp``.
+        """
+        return datetime.fromisoformat(self.timestamp.replace("Z", "+00:00"))
+
+    @property
+    def edited_at(self) -> datetime | None:
+        """Return the edit timestamp as a datetime, when present.
+
+        Returns:
+            The edit time, or None when the snapshot was not edited.
+        """
+        if self.edited_timestamp is None:
+            return None
+        return datetime.fromisoformat(self.edited_timestamp.replace("Z", "+00:00"))
+
+    @classmethod
+    def from_data(
+        cls, data: dict[str, Any], http: HTTPClient | None = None
+    ) -> MessageSnapshot:
+        """Build a snapshot from a decoded Fluxer payload.
+
+        Args:
+            data: Flat snapshot payload containing a timestamp.
+            http: Transport to bind to parsed stickers, when available.
+
+        Returns:
+            The parsed snapshot.
+        """
+        from ..sticker import Sticker
+        from .attachment import Attachment
+
+        return cls(
+            timestamp=data["timestamp"],
+            content=data.get("content", ""),
+            edited_timestamp=data.get("edited_timestamp"),
+            type=data.get("type", 0),
+            flags=MessageFlags(data.get("flags", 0)),
+            mentions=[int(item) for item in data.get("mentions", [])],
+            mention_roles=[int(item) for item in data.get("mention_roles", [])],
+            mention_channels=[dict(item) for item in data.get("mention_channels", [])],
+            embeds=[dict(item) for item in data.get("embeds", [])],
+            attachments=[Attachment.from_data(item) for item in data.get("attachments", [])],
+            stickers=[Sticker.from_data(item, http) for item in data.get("stickers", [])],
+            raw_data=dict(data),
+        )
+
+
+@dataclass(slots=True)
 class PartialMessage:
     """Lightweight handle for a Fluxer message.
 
@@ -160,7 +271,7 @@ class PartialMessage:
         if self._http is None:
             raise RuntimeError("PartialMessage is not bound to an HTTP client")
         data = await self._http.get_message(self.channel_id, self.id)
-        message = Message.from_data(data, self._http)
+        message = _snapshot(Message.from_data, data, self._http)
         message._channel = self._channel
         message._cache_guild(self._guild)
         return message
@@ -186,7 +297,7 @@ class PartialMessage:
             content=content,
             **kwargs,
         )
-        message = Message.from_data(data, self._http)
+        message = _snapshot(Message.from_data, data, self._http)
         message._channel = self._channel
         message._cache_guild(self._guild)
         return message
@@ -254,8 +365,9 @@ class Message:
         reactions: Reaction summaries.
         referenced_message: Resolved referenced message without a nested `referenced_message` field.
         message_reference: Reply or forward reference.
+        reference: Reply or forward reference with its resolved message.
         type: Message type.
-        flags: Message flags.
+        flags: Fluxer message flag wrapper retaining the raw mask.
         mention_everyone: Whether the message mentions everyone.
         tts: Whether the message requested text-to-speech.
         nonce: Caller-supplied message nonce, echoed to the sender as a string of 1 through 32 characters.
@@ -290,7 +402,7 @@ class Message:
     referenced_message: Message | DeletedReferencedMessage | None = None
     message_reference: MessageReference | None = None
     type: int = 0
-    flags: int = 0
+    flags: MessageFlags = field(default_factory=MessageFlags)
     mention_everyone: bool = False
     tts: bool = False
     nonce: str | None = None
@@ -300,13 +412,31 @@ class Message:
     mention_roles: list[int] = field(default_factory=list)
     nsfw_emojis: list[int] = field(default_factory=list)
     mention_channels: list[dict[str, Any]] = field(default_factory=list)
-    message_snapshots: list[dict[str, Any]] = field(default_factory=list)
+    message_snapshots: list[MessageSnapshot] = field(default_factory=list)
     stickers: list[Sticker] = field(default_factory=list)
     users: list[User] = field(default_factory=list)
 
+    _state: ConnectionState | None = field(default=None, repr=False, compare=False)
     _http: HTTPClient | None = field(default=None, repr=False)
     _channel: Channel | None = field(default=None, repr=False)
     _guild: Guild | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        """Normalize flags and bind the initial resolved message."""
+        self.flags = MessageFlags(self.flags)
+        if self.message_reference is not None:
+            self.message_reference._bind_resolved(self.referenced_message)
+
+    @property
+    def reference(self) -> MessageReference | None:
+        """Return the reference metadata with its current resolved message.
+
+        Returns:
+            The message reference, or None when no reference metadata exists.
+        """
+        if self.message_reference is not None:
+            self.message_reference._bind_resolved(self.referenced_message)
+        return self.message_reference
 
     @classmethod
     def from_data(cls, data: dict[str, Any], http: HTTPClient | None = None) -> Message:
@@ -351,7 +481,7 @@ class Message:
             mentions=mentions,
             pinned=data.get("pinned", False),
             type=data.get("type", 0),
-            flags=data.get("flags", 0),
+            flags=MessageFlags(data.get("flags", 0)),
             mention_everyone=data.get("mention_everyone", False),
             tts=data.get("tts", False),
             nonce=data.get("nonce"),
@@ -366,13 +496,15 @@ class Message:
             nsfw_emojis=[int(item) for item in data.get("nsfw_emojis", [])],
             mention_channels=[dict(item) for item in data.get("mention_channels", [])],
             message_snapshots=[
-                dict(item) for item in data.get("message_snapshots", [])
+                MessageSnapshot.from_data(item, http)
+                for item in data.get("message_snapshots", [])
             ],
             stickers=[
                 Sticker.from_data(item, http) for item in data.get("stickers", [])
             ],
             users=[User.from_data(item, http) for item in data.get("users", [])],
             _http=http,
+            _state=getattr(http, "_state", None),
             referenced_message=(
                 Message.from_data(ref_data, http)
                 if (ref_data := data.get("referenced_message"))
@@ -423,7 +555,9 @@ class Message:
         Returns:
             The result of this operation.
         """
-        return self._channel
+        if self._channel is not None:
+            return self._channel
+        return self._state.get_channel(self.channel_id) if self._state is not None else None
 
     @property
     def guild(self) -> Guild | None:
@@ -432,7 +566,9 @@ class Message:
         Returns:
             The result of this operation.
         """
-        return self._guild
+        if self._guild is not None:
+            return self._guild
+        return self._state.guilds.get(self.guild_id) if self._state is not None and self.guild_id is not None else None
 
     @property
     def guild_id(self) -> int | None:
@@ -498,9 +634,9 @@ class Message:
             files=file_list,
             **combined_kwargs,
         )
-        msg = Message.from_data(data, self._http)
-        msg._channel = self._channel
-        msg._cache_guild(self._guild)
+        msg = _snapshot(Message.from_data, data, self._http)
+        msg._channel = self.channel
+        msg._cache_guild(self.guild)
         return msg
 
     async def reply(
@@ -555,9 +691,9 @@ class Message:
             files=file_list,
             **combined_kwargs,
         )
-        msg = Message.from_data(data, self._http)
-        msg._channel = self._channel
-        msg._cache_guild(self._guild)
+        msg = _snapshot(Message.from_data, data, self._http)
+        msg._channel = self.channel
+        msg._cache_guild(self.guild)
         return msg
 
     async def send_to_channel(
@@ -605,10 +741,10 @@ class Message:
         data = await self._http.send_message(
             channel_id, content=content, files=file_list, **combined_kwargs
         )
-        msg = Message.from_data(data, self._http)
+        msg = _snapshot(Message.from_data, data, self._http)
         if int(channel_id) == self.channel_id:
-            msg._channel = self._channel
-            msg._cache_guild(self._guild)
+            msg._channel = self.channel
+            msg._cache_guild(self.guild)
         return msg
 
     async def edit(
@@ -629,9 +765,9 @@ class Message:
         data = await self._http.edit_message(
             self.channel_id, self.id, content=content, **kwargs
         )
-        msg = Message.from_data(data, self._http)
-        msg._channel = self._channel
-        msg._cache_guild(self._guild)
+        msg = _snapshot(Message.from_data, data, self._http)
+        msg._channel = self.channel
+        msg._cache_guild(self.guild)
         return msg
 
     async def delete(self) -> None:
@@ -815,6 +951,8 @@ class Message:
     def _cache_guild(self, guild: Guild | None) -> None:
         """Set cached guild on this message and referenced_message, since replies can be assumed to be in same guild."""
         self._guild = guild
+        if guild is not None:
+            self._guild_id = guild.id
         if self.member is not None and guild is not None:
             self.member.guild_id = guild.id
         if isinstance(self.referenced_message, Message):
@@ -835,4 +973,10 @@ class Message:
         return None
 
 
-__all__ = ("MessageReference", "DeletedReferencedMessage", "PartialMessage", "Message")
+__all__ = (
+    "MessageReference",
+    "DeletedReferencedMessage",
+    "MessageSnapshot",
+    "PartialMessage",
+    "Message",
+)

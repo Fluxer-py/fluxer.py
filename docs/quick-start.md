@@ -56,3 +56,27 @@ group, and `!help tools list_items` or `!help tools ls` for its subcommand.
 Pass `help_command=None` when constructing the bot to disable built-in help,
 or provide a `commands.HelpCommand` instance to replace it. A command prefix
 is required when constructing `fluxer.Bot`.
+
+## Gateway data events
+
+Every Gateway dispatch also has an `on_<gateway_event_name>_data` listener. The
+name uses the lowercased Gateway event name, and its single argument is the
+original decoded payload dictionary. For example, `MESSAGE_REACTION_ADD` maps
+to `on_message_reaction_add_data`:
+
+```py
+@bot.event
+async def on_message_reaction_add_data(data: dict):
+    print(data["message_id"], data["user_id"], data["emoji"])
+
+@bot.event
+async def on_reaction_add(reaction: fluxer.Reaction, user: fluxer.User):
+    print(user.id, reaction.count)
+```
+
+`on_reaction_add` receives the updated reaction and user when the message is
+cached. `on_raw_reaction_add` continues to receive a reaction event object even
+when the message is not cached. The data listener always receives the original
+Gateway payload, including fields not represented by either event object.
+Data listeners also work for events without a modeled callback, and
+`await bot.wait_for("message_reaction_add_data")` waits for the next payload.

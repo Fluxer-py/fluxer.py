@@ -5,6 +5,8 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+from .._model_factory import _snapshot
+
 from .._endpoints import asset_url
 
 from dataclasses import dataclass, field
@@ -12,6 +14,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ..utils import snowflake_to_datetime
+from .._collections import _WeakRefable
 
 if TYPE_CHECKING:
     from ..file import File
@@ -21,7 +24,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True)
-class User:
+class User(_WeakRefable):
     """A complete or partial Fluxer user payload.
 
     ID-only references have an empty username until resolved from cached user data.
@@ -318,7 +321,7 @@ class User:
         if self._http is None:
             raise RuntimeError("User is not bound to an HTTP client")
         data = await self._http.create_dm(self.id)
-        return Channel.from_data(data, self._http)
+        return _snapshot(Channel.from_data, data, self._http)
 
     async def send(
         self,

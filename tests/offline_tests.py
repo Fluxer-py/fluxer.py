@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import pytest
-import types
 import sys
 from pathlib import Path
 from typing import Any, Literal, cast

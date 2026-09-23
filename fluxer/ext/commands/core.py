@@ -140,7 +140,11 @@ class Command:
             params = params[1:]
         if params and params[0].name == "ctx":
             params = params[1:]
-        return OrderedDict((param.name, param) for param in params)
+        return OrderedDict(
+            (param.name, param)
+            for param in params
+            if param.name not in {"self", "ctx"}
+        )
 
     @property
     def short_doc(self) -> str:

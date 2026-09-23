@@ -5,14 +5,17 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+from .._model_factory import _snapshot
+
 from .._types import UNSET, UnsetType
+from ..flags import MessageFlags
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, unquote
 
 from .user import User
-from .message import Message, MessageReference, DeletedReferencedMessage
+from .message import Message, MessageReference, MessageSnapshot, DeletedReferencedMessage
 from .attachment import Attachment
 from .reaction import Reaction
 from ..sticker import Sticker
@@ -38,7 +41,7 @@ class WebhookMessage:
         mentions: The users the message actively mentions.
         pinned: Whether the message is pinned.
         type: Message type.
-        flags: Message flags.
+        flags: Fluxer message flag wrapper retaining the raw mask.
         tts: Whether the message requested text-to-speech.
         mention_everyone: Whether the message mentions everyone.
         nonce: Caller-supplied message nonce, echoed to the sender as a string of 1 through 32 characters.
@@ -52,6 +55,7 @@ class WebhookMessage:
         reactions: Reaction summaries.
         message_reference: Reply or forward reference.
         referenced_message: Resolved referenced message without a nested `referenced_message` field.
+        reference: Reply or forward reference with its resolved message.
         webhook_id: Originating webhook ID, present only for a webhook-authored message.
         webhook_token: Webhook capability used for message edits and deletion; excluded from repr.
     """
@@ -69,7 +73,7 @@ class WebhookMessage:
     pinned: bool = False
 
     type: int = 0
-    flags: int = 0
+    flags: MessageFlags = field(default_factory=MessageFlags)
     tts: bool = False
     mention_everyone: bool = False
     nonce: str | None = None
@@ -79,7 +83,7 @@ class WebhookMessage:
     nsfw_emojis: list[int] = field(default_factory=list)
     users: list[User] = field(default_factory=list)
     stickers: list[Sticker] = field(default_factory=list)
-    message_snapshots: list[dict[str, Any]] = field(default_factory=list)
+    message_snapshots: list[MessageSnapshot] = field(default_factory=list)
     reactions: list[Reaction] = field(default_factory=list)
     message_reference: MessageReference | None = None
     referenced_message: Message | DeletedReferencedMessage | None = None
@@ -87,6 +91,23 @@ class WebhookMessage:
     webhook_id: int | None = None
     webhook_token: str | None = field(default=None, repr=False)
     _http: HTTPClient | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        """Normalize flags and bind the initial resolved message."""
+        self.flags = MessageFlags(self.flags)
+        if self.message_reference is not None:
+            self.message_reference._bind_resolved(self.referenced_message)
+
+    @property
+    def reference(self) -> MessageReference | None:
+        """Return the reference metadata with its current resolved message.
+
+        Returns:
+            The message reference, or None when no reference metadata exists.
+        """
+        if self.message_reference is not None:
+            self.message_reference._bind_resolved(self.referenced_message)
+        return self.message_reference
 
     @classmethod
     def from_data(
@@ -167,7 +188,7 @@ class WebhookMessage:
             self.id,
             **payload,
         )
-        return WebhookMessage.from_data(
+        return _snapshot(WebhookMessage.from_data,
             data,
             self._http,
             webhook_id=self.webhook_id,
@@ -414,7 +435,7 @@ class Webhook:
             tts=tts,
         )
         if data is not None:
-            return WebhookMessage.from_data(
+            return _snapshot(WebhookMessage.from_data,
                 data,
                 self._http,
                 webhook_id=self.id,
@@ -462,7 +483,7 @@ class Webhook:
             message_id,
             **payload,
         )
-        return WebhookMessage.from_data(
+        return _snapshot(WebhookMessage.from_data,
             data,
             self._http,
             webhook_id=self.id,

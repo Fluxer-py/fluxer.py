@@ -5,11 +5,15 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+from .._model_factory import _snapshot
+
 from .._endpoints import asset_url
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Sequence
+from .._collections import _EntitySequence
 
 from .emoji import Emoji
 from .member import GuildMember
@@ -28,6 +32,7 @@ from ..fluxer_models import (
 )
 
 if TYPE_CHECKING:
+    from ..state import ConnectionState
     from ..audit_logs import AuditLog
     from ..fluxer_models import BulkEmojiResult
     from ..fluxer_models import BulkStickerResult
@@ -54,6 +59,7 @@ class Guild:
         roles: Guild roles.
         channels: Guild channels the caller can view.
         members: Members used by this operation.
+        member_cache_complete: Whether a tracked full roster reconciles with the guild's member count.
         emojis: Guild emojis.
         stickers: Guild stickers.
         banner: Guild banner hash.
@@ -97,11 +103,12 @@ class Guild:
     owner_id: int | None = None
     member_count: int | None = None
     unavailable: bool = False
-    roles: list[Role] = field(default_factory=list)
-    channels: list[Channel] = field(default_factory=list)
-    members: list[GuildMember] = field(default_factory=list)
-    emojis: list[Emoji] = field(default_factory=list)
-    stickers: list[Sticker] = field(default_factory=list)
+    roles: Sequence[Role] = field(default_factory=list)
+    channels: Sequence[Channel] = field(default_factory=list)
+    members: Sequence[GuildMember] = field(default_factory=list)
+    emojis: Sequence[Emoji] = field(default_factory=list)
+    stickers: Sequence[Sticker] = field(default_factory=list)
+    _member_cache_complete: bool = field(default=False, repr=False)
 
     banner: str | None = None
     splash: str | None = None
@@ -135,7 +142,78 @@ class Guild:
     nsfw: bool = False
     features: list[str] = field(default_factory=list)
 
+    _state: ConnectionState | None = field(default=None, repr=False, compare=False)
     _http: HTTPClient | None = field(default=None, repr=False)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Convert constructor collections to read-only views."""
+        if name in ("roles", "channels", "members", "emojis", "stickers"):
+            if hasattr(self, name):
+                raise AttributeError(f"Guild.{name} is a read-only cache view")
+            value = _EntitySequence(value)
+        object.__setattr__(self, name, value)
+
+    @property
+    def _roles(self) -> dict[int, Role]:
+        return cast(_EntitySequence[Role], self.roles)._data
+
+    @property
+    def _channels(self) -> dict[int, Channel]:
+        return cast("_EntitySequence[Channel]", self.channels)._data
+
+    @property
+    def _members(self) -> dict[int, GuildMember]:
+        return cast(_EntitySequence[GuildMember], self.members)._data
+
+    @property
+    def _emojis(self) -> dict[int, Emoji]:
+        return cast(_EntitySequence[Emoji], self.emojis)._data
+
+    @property
+    def _stickers(self) -> dict[int, Sticker]:
+        return cast(_EntitySequence[Sticker], self.stickers)._data
+
+    @property
+    def member_cache_complete(self) -> bool:
+        """Whether the retained member roster is known to be complete.
+
+        Returns:
+            False for initial snapshots, partial requests, and disabled retention.
+        """
+        return self._member_cache_complete
+
+    def get_member(self, user_id: int) -> GuildMember | None:
+        """Look up a retained member without making an HTTP request.
+
+        Args:
+            user_id: Account ID to look up.
+
+        Returns:
+            The member, or None when it is not cached.
+        """
+        return self._members.get(user_id)
+
+    def get_channel(self, channel_id: int) -> Channel | None:
+        """Look up a visible cached channel.
+
+        Args:
+            channel_id: Channel ID to look up.
+
+        Returns:
+            The channel, or None when it is not cached.
+        """
+        return self._channels.get(channel_id)
+
+    def get_role(self, role_id: int) -> Role | None:
+        """Look up a cached role.
+
+        Args:
+            role_id: Role ID to look up.
+
+        Returns:
+            The role, or None when it is not cached.
+        """
+        return self._roles.get(role_id)
 
     @classmethod
     def from_data(cls, data: dict[str, Any], http: HTTPClient | None = None) -> Guild:
@@ -218,6 +296,7 @@ class Guild:
             nsfw=data.get("nsfw", False),
             features=list(data.get("features", [])),
             _http=http,
+            _state=getattr(http, "_state", None),
         )
 
         for channel in guild.channels:
@@ -259,7 +338,7 @@ class Guild:
         data = await self._http.get_guild_emojis(self.id)
         # Pass guild_id when creating emojis since API doesn't always return it
         return [
-            Emoji.from_data(emoji_data, self._http, guild_id=self.id)
+            _snapshot(Emoji.from_data, emoji_data, self._http, guild_id=self.id)
             for emoji_data in data
         ]
 
@@ -277,7 +356,7 @@ class Guild:
 
         data = await self._http.get_guild_roles(self.id)
         return [
-            Role.from_data(role_data, self._http, guild_id=self.id)
+            _snapshot(Role.from_data, role_data, self._http, guild_id=self.id)
             for role_data in data
         ]
 
@@ -315,7 +394,7 @@ class Guild:
             hoist=hoist,
             mentionable=mentionable,
         )
-        return Role.from_data(data, self._http, guild_id=self.id)
+        return _snapshot(Role.from_data, data, self._http, guild_id=self.id)
 
     # -- Member Management Methods --
     async def fetch_member(self, user_id: int) -> GuildMember:
@@ -333,7 +412,7 @@ class Guild:
         from .member import GuildMember
 
         data = await self._http.get_guild_member(self.id, user_id)
-        return GuildMember.from_data(data, self._http, guild_id=self.id)
+        return _snapshot(GuildMember.from_data, data, self._http, guild_id=self.id)
 
     async def fetch_members(
         self, *, limit: int = 100, after: int | None = None
@@ -354,7 +433,7 @@ class Guild:
 
         data = await self._http.get_guild_members(self.id, limit=limit, after=after)
         return [
-            GuildMember.from_data(member_data, self._http, guild_id=self.id)
+            _snapshot(GuildMember.from_data, member_data, self._http, guild_id=self.id)
             for member_data in data
         ]
 
@@ -460,7 +539,7 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot fetch stickers without HTTPClient")
         data = await self._http.get_guild_stickers(self.id)
-        return [Sticker.from_data(item, self._http, guild_id=self.id) for item in data]
+        return [_snapshot(Sticker.from_data, item, self._http, guild_id=self.id) for item in data]
 
     async def discovery_status(self) -> DiscoveryStatus:
         """Discovery status.
@@ -639,7 +718,7 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot clone emoji without HTTPClient")
         data = await self._http.clone_guild_emoji(self.id, **payload)
-        return Emoji.from_data(data, self._http, guild_id=self.id)
+        return _snapshot(Emoji.from_data, data, self._http, guild_id=self.id)
 
     async def clone_sticker(self, **payload: Any) -> Sticker:
         """Clone sticker.
@@ -653,7 +732,7 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot clone sticker without HTTPClient")
         data = await self._http.clone_guild_sticker(self.id, **payload)
-        return Sticker.from_data(data, self._http, guild_id=self.id)
+        return _snapshot(Sticker.from_data, data, self._http, guild_id=self.id)
 
     async def search_messages(
         self,

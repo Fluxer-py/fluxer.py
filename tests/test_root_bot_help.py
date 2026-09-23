@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -34,12 +35,21 @@ def test_root_exports_and_default_help() -> None:
         fluxer.Bot()  # type: ignore[call-arg]
 
 
+def test_command_signature_omits_callback_internal_names() -> None:
+    @commands.command()
+    async def legacy_shape(self: object, ctx: commands.Context, value: str) -> None:
+        pass
+
+    assert legacy_shape.signature == "<value>"
+    assert list(legacy_shape.clean_params) == ["value"]
+
+
 @pytest.mark.asyncio
 async def test_root_help_supports_commands_groups_and_aliases() -> None:
     bot = fluxer.Bot(command_prefix="!")
 
     @bot.command(aliases=["hi"])
-    async def greet(ctx: commands.Context) -> None:
+    async def greet(ctx: commands.Context, name: str) -> None:
         """Greet someone."""
 
     @bot.group()
@@ -47,8 +57,15 @@ async def test_root_help_supports_commands_groups_and_aliases() -> None:
         """Utility commands."""
 
     @tools.command(aliases=["show"])
-    async def list_items(ctx: commands.Context) -> None:
+    async def list_items(ctx: commands.Context, category: str) -> None:
         """List items."""
+
+    class Utility(commands.Cog):
+        @commands.command()
+        async def inspect(self, ctx: commands.Context, item: str) -> None:
+            """Inspect an item."""
+
+    await bot.add_cog(Utility(bot))
 
     for invocation, expected in (
         ("!help", "greet"),
@@ -56,11 +73,20 @@ async def test_root_help_supports_commands_groups_and_aliases() -> None:
         ("!help hi", "Greet someone"),
         ("!help tools", "list_items"),
         ("!help tools show", "List items"),
+        ("!help inspect", "Inspect an item"),
     ):
         message = Message(invocation)
         await bot.invoke(await bot.get_context(message))
         output = "\n".join(call.args[0] for call in message.channel.send.call_args_list)
         assert expected in output
+        assert "<self>" not in output
+        assert "<ctx>" not in output
+        if invocation == "!help greet":
+            assert "!greet <name>" in output or "![greet|hi] <name>" in output
+        if invocation == "!help tools show":
+            assert "<category>" in output
+        if invocation == "!help inspect":
+            assert "!inspect <item>" in output
 
     custom = commands.MinimalHelpCommand()
     bot.help_command = custom
@@ -126,7 +152,7 @@ async def test_client_listener_api_uses_the_same_event_path() -> None:
 async def test_gateway_message_fires_listener_and_processes_command() -> None:
     bot = fluxer.Bot(command_prefix="!", help_command=None)
     message = Message("!ping")
-    bot._parse_message = lambda data: message  # type: ignore[method-assign]
+    bot._state._parsers["MESSAGE_CREATE"] = lambda data: [("on_message", (message,))]
     seen: list[str] = []
 
     @bot.listen("on_message")
@@ -167,12 +193,12 @@ async def test_root_checks_attach_framework_predicates(monkeypatch: pytest.Monke
     async def named_role_command(ctx: commands.Context) -> None:
         pass
 
-    ctx = SimpleNamespace(author=SimpleNamespace(id=7))
-    assert await role_command.checks[0](ctx)
+    ctx = cast(commands.Context, SimpleNamespace(author=SimpleNamespace(id=7)))
+    assert await core._maybe_await(role_command.checks[0](ctx))
     role_check.assert_awaited_once_with(ctx, 7, (42,))
-    assert await named_role_command.checks[0](ctx)
+    assert await core._maybe_await(named_role_command.checks[0](ctx))
     role_check.assert_awaited_with(ctx, 7, ("Mods",))
-    assert await permission_command.checks[0](ctx)
+    assert await core._maybe_await(permission_command.checks[0](ctx))
     permission_check.assert_awaited_once_with(
         ctx, 7, {"kick_members": True, "ban_members": True}
     )

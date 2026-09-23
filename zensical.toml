@@ -18,6 +18,7 @@ nav = [
   { "Bot or Client?" = "bot-vs-client.md" },
   { "Your first bot" = "quick-start.md" },
   { "More info" = "readme.md" },
+  { "Caching" = "caching.md" },
 ]
 
 # extra_css = ["stylesheets/extra.css"]

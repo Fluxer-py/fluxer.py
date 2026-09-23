@@ -5,8 +5,10 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+from ..flags import AttachmentFlags
 
 
 @dataclass(slots=True)
@@ -27,7 +29,7 @@ class Attachment:
         title: Title used by this operation.
         content_hash: Content hash used by this operation.
         placeholder: Placeholder used by this operation.
-        flags: Bit mask governing the object's documented flags.
+        flags: Fluxer attachment flag wrapper retaining the raw mask.
         nsfw: Nsfw used by this operation.
         duration: Duration used by this operation.
         waveform: Waveform used by this operation.
@@ -49,12 +51,24 @@ class Attachment:
     title: str | None = None
     content_hash: str | None = None
     placeholder: str | None = None
-    flags: int = 0
+    flags: AttachmentFlags = field(default_factory=AttachmentFlags)
     nsfw: bool | None = None
     duration: int | None = None
     waveform: str | None = None
     expires_at: str | None = None
     expired: bool | None = None
+
+    def __post_init__(self) -> None:
+        """Normalize an integer flag mask supplied to the constructor."""
+        self.flags = AttachmentFlags(self.flags)
+
+    def is_spoiler(self) -> bool:
+        """Return whether Fluxer presents this attachment as a spoiler.
+
+        Returns:
+            Whether the spoiler flag is set.
+        """
+        return self.flags.is_spoiler
 
     @classmethod
     def from_data(cls, data: dict[str, Any]) -> Attachment:
@@ -80,7 +94,7 @@ class Attachment:
             title=data.get("title", None),
             content_hash=data.get("content_hash", None),
             placeholder=data.get("placeholder", None),
-            flags=data.get("flags", 0),
+            flags=AttachmentFlags(data.get("flags", 0)),
             nsfw=data.get("nsfw", None),
             duration=data.get("duration", None),
             waveform=data.get("waveform", None),
@@ -122,7 +136,7 @@ class Attachment:
             "expires_at",
             "expired",
         ):
-            value = getattr(self, key)
+            value = int(self.flags) if key == "flags" else getattr(self, key)
             if value is not None:
                 data[key] = value
         return data

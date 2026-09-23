@@ -5,11 +5,14 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+from .._model_factory import _snapshot
+
 from .._endpoints import asset_url
 
 from .._types import UNSET, UnsetType
 
-from dataclasses import dataclass, field, fields
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -27,6 +30,7 @@ class GuildMember:
 
     Attributes:
         user: The account the membership belongs to.
+        id: The account ID of this guild member.
         nick: The nickname the account uses in this guild, or null when none is set.
         avatar_hash: Avatar content hash, or None when no avatar is available.
         banner: The image hash of the guild-specific banner, or null when none is set.
@@ -42,7 +46,8 @@ class GuildMember:
         communication_disabled_until: The time the communication timeout expires, or null when the member is not timed out.
         profile_flags: The guild member profile flags set on the membership.
         mention_flags: The reply mention preference that applies only inside this guild.
-        display_name: The best display name for this member.
+        display_name: Guild nickname, or the account's display name.
+        display_avatar: Guild avatar, account avatar, or default avatar URL.
         mention: Return a string that mentions this member.
         guild_avatar_url: URL for the member's guild-specific avatar, if set.
     """
@@ -120,6 +125,15 @@ class GuildMember:
         )
 
     @property
+    def id(self) -> int:
+        """Return the ID of the account represented by this member.
+
+        Returns:
+            The member's account ID.
+        """
+        return self.user.id
+
+    @property
     def display_name(self) -> str:
         """The best display name for this member.
 
@@ -128,7 +142,23 @@ class GuildMember:
         Returns:
             The result of this operation.
         """
-        return self.nick or self.user.global_name or self.user.username
+        return self.nick or self.user.display_name
+
+    @property
+    def display_avatar(self) -> str:
+        """Return the best available avatar URL for this member.
+
+        Guild avatars take precedence over account avatars; members without
+        either use the account's generated default avatar.
+
+        Returns:
+            The guild, account, or default avatar URL.
+        """
+        return (
+            self.guild_avatar_url
+            or self.user.avatar_url
+            or self.user.default_avatar_url
+        )
 
     @property
     def mention(self) -> str:
@@ -295,7 +325,9 @@ class GuildMember:
         communication_disabled_until: str | None | UnsetType = UNSET,
         reason: str | None = None,
     ) -> "GuildMember":
-        """Edit this member.
+        """Edit this member and return an independent HTTP snapshot.
+
+        The receiving member remains unchanged until a Gateway update arrives.
 
         Args:
             nick: New nickname (None to remove)
@@ -307,7 +339,7 @@ class GuildMember:
             reason: Reason for audit log
 
         Returns:
-            Updated GuildMember object
+            Updated GuildMember snapshot with independent user and role data.
         """
         if not self._http:
             raise RuntimeError("Cannot edit member without HTTPClient")
@@ -325,16 +357,14 @@ class GuildMember:
             communication_disabled_until=communication_disabled_until,
             reason=reason,
         )
-        updated = GuildMember.from_data(
+        updated = _snapshot(GuildMember.from_data,
             {"user": {"id": str(self.user.id)}, **data},
             self._http,
             guild_id=self.guild_id,
         )
         if "user" not in data:
-            updated.user = self.user
-        for attribute in fields(self):
-            setattr(self, attribute.name, getattr(updated, attribute.name))
-        return self
+            updated.user = deepcopy(self.user, {id(self._http): self._http})
+        return updated
 
     def __str__(self) -> str:
         """Return the member's display name.

@@ -3,7 +3,7 @@
 This module documents the existing implementation and its supported public surface.
 """
 
-__version__ = "0.4.2"
+__version__ = "0.5.0-alpha.4"
 __title__ = "fluxer.py"
 __author__ = "Emil"
 __license__ = "MIT"
@@ -14,6 +14,7 @@ from .ext.commands import Bot, when_mentioned_or, when_mentioned
 from .cog import Cog
 from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
 from .file import File
+from .flags import AttachmentFlags, MessageFlags
 from .fluxer_models import (
     SearchAuthorType,
     SearchContentType,
@@ -25,6 +26,7 @@ from .fluxer_models import (
     SearchSortBy,
     SearchSortOrder,
 )
+from .sticker import Sticker
 from .http import HTTPClient
 
 # Checks
@@ -63,6 +65,7 @@ from .models import (
     GuildMember,
     Message,
     MessageReference,
+    MessageSnapshot,
     DeletedReferencedMessage,
     PartialMessage,
     Reaction,
@@ -111,6 +114,8 @@ __all__ = [
     "GatewayOpcode",
     "Intents",
     "Permissions",
+    "AttachmentFlags",
+    "MessageFlags",
     "PermissionOverwriteType",
     "SearchAuthorType",
     "SearchContentType",
@@ -138,6 +143,7 @@ __all__ = [
     "GuildMember",
     "Message",
     "MessageReference",
+    "MessageSnapshot",
     "DeletedReferencedMessage",
     "PartialMessage",
     "PermissionOverwrite",
@@ -155,6 +161,7 @@ __all__ = [
     # Utils
     "datetime_to_snowflake",
     "snowflake_to_datetime",
+    "Sticker",
     # Voice (present only when the 'voice' extra is installed)
 ]
 
