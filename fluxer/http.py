@@ -86,7 +86,12 @@ class RateLimiter:
             if now < reset_at:
                 delay = reset_at - now
                 log.debug("Rate limited on bucket %s, waiting %.2fs", bucket, delay)
-                await asyncio.sleep(delay)
+                try:
+                    await asyncio.sleep(delay)
+                except BaseException:
+                    # Don't leak the bucket lock if we're cancelled while waiting
+                    lock.release()
+                    raise
 
     def release(self, bucket: str, headers: dict[str, str]) -> None:
         """Update rate limit state from response headers and release the lock."""
@@ -210,6 +215,7 @@ class HTTPClient:
         while True:
             await self._rate_limiter.acquire(route.bucket)
 
+            released = False
             try:
                 async with session.request(
                     route.method,
@@ -221,6 +227,7 @@ class HTTPClient:
                 ) as resp:
                     resp_headers = {k: v for k, v in resp.headers.items()}
                     self._rate_limiter.release(route.bucket, resp_headers)
+                    released = True
 
                     # Success
                     if 200 <= resp.status < 300:
@@ -278,7 +285,9 @@ class HTTPClient:
                     )
 
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-                self._rate_limiter.release(route.bucket, {})
+                if not released:
+                    self._rate_limiter.release(route.bucket, {})
+                    released = True
                 log.warning(
                     "Connection error: %s, retrying (attempt %d)", exc, attempt + 1
                 )
@@ -287,6 +296,12 @@ class HTTPClient:
                     raise
                 await asyncio.sleep(1 + attempt)
                 continue
+            finally:
+                # Always free the bucket lock, even if the request is cancelled
+                # (e.g. by a caller's asyncio.wait_for) or fails unexpectedly;
+                # otherwise every later request on this bucket blocks forever.
+                if not released:
+                    self._rate_limiter.release(route.bucket, {})
 
     # =========================================================================
     # Convenience methods for common endpoints

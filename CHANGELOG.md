@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Fixed per-route rate limit lock leaking when a request is cancelled (e.g. by `asyncio.wait_for`) or fails unexpectedly, which made every later request on that route hang forever
+
 ## [0.4.2] - 2026-03-30
 
 ### Added
