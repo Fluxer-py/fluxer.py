@@ -1428,9 +1428,9 @@ async def test_guild_member_helpers() -> None:
     assert edited.nick == "Edited"
     assert edited.roles == [30, 31]
     assert edited.mute is True
-    assert edited.avatar_hash == "data:image/png;base64,abc"
-    assert edited.banner == "data:image/png;base64,def"
-    assert edited.accent_color == 0x336699
+    assert edited.guild_avatar_hash == "data:image/png;base64,abc"
+    assert edited.guild_banner_hash == "data:image/png;base64,def"
+    assert edited.guild_accent_color == 0x336699
     assert http.modified_members[-1][2]["bio"] == "bio"
     assert http.modified_members[-1][2]["timeout_reason"] == "test"
 

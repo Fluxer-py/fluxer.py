@@ -96,7 +96,8 @@ class Client:
         self._event_handlers: dict[str, list[EventHandler]] = {}
         self._handler_tasks: set[asyncio.Task[None]] = set()
         self._state = ConnectionState(
-            max_messages=max_messages, cache_members=cache_members,
+            max_messages=max_messages,
+            cache_members=cache_members,
             max_private_channels=max_private_channels,
         )
         self._guilds = self._state.guilds
@@ -131,6 +132,19 @@ class Client:
             The result of this operation.
         """
         return self._user
+
+    @property
+    def latency(self) -> float:
+        """Gateway latency: seconds between a heartbeat and its acknowledgement.
+
+        Multiply by 1000 for milliseconds, e.g. ``round(bot.latency * 1000)``.
+
+        Returns:
+            The latest heartbeat round-trip time; ``float("inf")`` while connected
+            but before the first acknowledgement, and ``float("nan")`` when no
+            gateway connection has been started.
+        """
+        return float("nan") if self._gateway is None else self._gateway.latency
 
     @property
     def guilds(self) -> list[Guild]:
@@ -463,7 +477,6 @@ class Client:
                         f"Voice placement rejected: {data['error_code']}"
                     )
                 await self._fire("on_voice_state_ack", data)
-
 
     def _replace_guild_snapshot(self, data: dict[str, Any]) -> Guild:
         """Delegate a live guild snapshot to the state owner."""
@@ -830,7 +843,9 @@ class Client:
         Note:
             Requires the `voice` extra: `pip install fluxer.py[voice]`.
         """
-        from .voice import VoiceClient
+        # Lazy import: fluxer.voice requires the optional `voice` extra (livekit)
+        # and raises ImportError when it is missing.
+        from .voice import VoiceClient  # noqa: PLC0415
 
         if self._gateway is None:
             raise RuntimeError("Cannot join voice before connecting")
@@ -874,7 +889,12 @@ class Client:
         Returns:
             The requested voice state, or None when no matching value is available.
         """
-        return next(iter(self._state._voice_users.get((int(guild_id), int(user_id)), {}).values()), None)
+        return next(
+            iter(
+                self._state._voice_users.get((int(guild_id), int(user_id)), {}).values()
+            ),
+            None,
+        )
 
     def get_guild_voice_states(self, guild_id: int) -> list[VoiceState]:
         """Return all cached voice states for a guild.
@@ -915,7 +935,9 @@ class Client:
         assert voice_state.user_id is not None
         return (voice_state.user_id, voice_state.connection_id)
 
-    def _seed_guild_voice_states(self, guild_id: int, voice_states: list[dict[str, Any]]) -> None:
+    def _seed_guild_voice_states(
+        self, guild_id: int, voice_states: list[dict[str, Any]]
+    ) -> None:
         """Seed voice entries through the state owner."""
         for data in voice_states:
             self._state._store_voice_state({**data, "guild_id": str(guild_id)})
@@ -1077,11 +1099,17 @@ class Client:
         """
         gateway = self._require_gateway()
         nonce = nonce if nonce is not None else uuid.uuid4().hex
-        self._state._track_member_request(int(guild_id), nonce, not query and limit == 0 and not user_ids)
+        self._state._track_member_request(
+            int(guild_id), nonce, not query and limit == 0 and not user_ids
+        )
         try:
             await gateway.request_guild_members(
-                guild_id=guild_id, query=query, limit=limit,
-                presences=presences, user_ids=user_ids, nonce=nonce,
+                guild_id=guild_id,
+                query=query,
+                limit=limit,
+                presences=presences,
+                user_ids=user_ids,
+                nonce=nonce,
             )
         except BaseException:
             self._state._cancel_member_request(int(guild_id), nonce)
@@ -1112,7 +1140,9 @@ class Client:
             channels=channels,
             **({"channel_id": channel_id} if channel_id is not None else {}),
         )
-        selected = channels or ({str(channel_id): ranges} if channel_id is not None else {})
+        selected = channels or (
+            {str(channel_id): ranges} if channel_id is not None else {}
+        )
         self._state._track_member_ranges(int(guild_id), selected, ranges)
 
     async def request_guild_counts(self, guild_ids: list[int | str]) -> None:
@@ -1214,7 +1244,9 @@ class Client:
             task.cancel()
         try:
             await asyncio.gather(*handlers, return_exceptions=True)
-            for vc in set(self._pending_voice.values()) | set(self._active_voice.values()):
+            for vc in set(self._pending_voice.values()) | set(
+                self._active_voice.values()
+            ):
                 vc._reject_placement("Client closed during voice placement")
                 await vc.disconnect()
         finally:

@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ..._model_factory import _snapshot
+from ...errors import NotFound
+from ...models.member import GuildMember
+
 if TYPE_CHECKING:
     from .view import StringView
     from .bot import Bot
@@ -32,7 +36,7 @@ class Context:
         valid: Return whether a command was resolved for this context.
         guild: Return the guild cached for this invocation.
         channel: Return the channel cached for this invocation.
-        author: Return the user who authored the command message.
+        author: Return the command author, as a GuildMember when one is known.
     """
 
     bot: Bot
@@ -84,13 +88,52 @@ class Context:
         return self.message.channel
 
     @property
-    def author(self) -> User:
-        """Return the user who authored the command message.
+    def author(self) -> User | GuildMember:
+        """Return the command author, as a GuildMember when one is known.
+
+        This is ``message.author``: a GuildMember when the message payload
+        included the membership or the member is cached, otherwise a User.
+        Use :meth:`fetch_author` to get the GuildMember regardless of the cache.
 
         Returns:
-            The result of this operation.
+            The author's GuildMember, or their User in DMs and on a cache miss.
         """
         return self.message.author
+
+    async def fetch_author(self) -> User | GuildMember:
+        """Return the author's GuildMember, fetching it over HTTP when not cached.
+
+        The fetched member is an independent snapshot; it is not added to the
+        member cache and does not replace ``ctx.author``.
+
+        Returns:
+            The author's GuildMember in a guild. The User in DMs, for webhook
+            messages, or when the author is no longer a member of the guild.
+        """
+        message = self.message
+        author = message.author
+        if isinstance(author, GuildMember) or message.webhook_id is not None:
+            return author
+        guild_id = message.guild_id
+        if guild_id is None:
+            channel = message.channel
+            guild_id = channel.guild_id if channel is not None else None
+        if guild_id is None:
+            return author
+        cached = self.bot.get_member(guild_id, author.id)
+        if cached is not None:
+            return cached
+        http = self.bot._http
+        if http is None:
+            return author
+        try:
+            data = await http.get_guild_member(guild_id, author.id)
+        except NotFound:
+            return author
+        member = _snapshot(GuildMember.from_data, data, http, guild_id=guild_id)
+        if "user" not in data:
+            member.user = author
+        return member
 
     async def send(self, content: str | None = None, **kwargs: Any) -> Message:
         """Send a message to the invocation channel.

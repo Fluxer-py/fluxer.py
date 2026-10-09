@@ -8,15 +8,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from ..asset import Asset, _AssetBacked
+from .member import GuildMember
+from .user import User
 
 if TYPE_CHECKING:
     from ..http import HTTPClient
     from .message import Message
-    from .user import User
 
 
 @dataclass(slots=True)
-class PartialEmoji:
+class PartialEmoji(_AssetBacked):
     """Represents a partial emoji (used in reactions).
 
     This can be either a custom emoji or a unicode emoji.
@@ -28,19 +30,25 @@ class PartialEmoji:
         unicode: Unicode used by this operation.
         is_unicode_emoji: Whether this is a unicode emoji (vs custom emoji).
         is_custom_emoji: Whether this is a custom emoji.
+        asset: The custom emoji image, or None for a Unicode emoji.
+        url: URL of the custom emoji image, or None for a Unicode emoji.
     """
 
     name: str | None = None
     id: int | None = None
     animated: bool = False
     unicode: str | None = None
+    _http: HTTPClient | None = field(default=None, repr=False, compare=False)
 
     @classmethod
-    def from_data(cls, data: dict[str, Any]) -> PartialEmoji:
+    def from_data(
+        cls, data: dict[str, Any], http: HTTPClient | None = None
+    ) -> PartialEmoji:
         """Create a PartialEmoji from gateway data.
 
         Args:
             data: Decoded payload to parse; omitted fields retain the parser's documented defaults.
+            http: Transport used to build the custom emoji image URL.
 
         Returns:
             A parsed PartialEmoji instance.
@@ -51,7 +59,35 @@ class PartialEmoji:
             id=int(emoji_id) if emoji_id else None,
             animated=data.get("animated", False),
             unicode=data.get("name") if not emoji_id else None,
+            _http=http,
         )
+
+    @property
+    def asset(self) -> Asset | None:
+        """The custom emoji image, or None for a Unicode emoji.
+
+        Returns:
+            The image asset of a custom emoji.
+        """
+        if self.id is None:
+            return None
+        return Asset._from_emoji(self._http, self.id, self.animated)
+
+    @property
+    def url(self) -> str | None:
+        """URL of the custom emoji image, or None for a Unicode emoji.
+
+        Returns:
+            The image URL of a custom emoji.
+        """
+        asset = self.asset
+        return asset.url if asset else None
+
+    def _require_asset(self) -> Asset:
+        asset = self.asset
+        if asset is None:
+            raise ValueError("A Unicode emoji has no image to download")
+        return asset
 
     @property
     def is_unicode_emoji(self) -> bool:
@@ -142,7 +178,7 @@ class Reaction:
         Returns:
             A parsed Reaction instance.
         """
-        emoji = PartialEmoji.from_data(data["emoji"])
+        emoji = PartialEmoji.from_data(data["emoji"], http)
         return cls(
             emoji=emoji,
             count=data.get("count", 0),
@@ -177,9 +213,7 @@ class Reaction:
         if not self._http or not self._message:
             raise RuntimeError("Cannot remove reaction without HTTPClient and Message")
 
-        from .user import User as UserModel
-
-        user_id = user.id if isinstance(user, UserModel) else user
+        user_id = user.id if isinstance(user, User) else user
         await self._http.delete_reaction(
             self._message.channel_id, self._message.id, self.emoji, user_id
         )
@@ -245,6 +279,7 @@ class RawReactionActionEvent:
         user_id: Identity of the user used by this operation.
         emoji: Emoji used by this operation.
         event_type: Event type used by this operation.
+        member: The reacting member, when the event is in a guild and supplies one.
     """
 
     message_id: int
@@ -253,26 +288,36 @@ class RawReactionActionEvent:
     user_id: int
     emoji: PartialEmoji
     event_type: str  # "REACTION_ADD" or "REACTION_REMOVE"
+    member: GuildMember | None = None
 
     @classmethod
-    def from_data(cls, data: dict[str, Any], event_type: str) -> RawReactionActionEvent:
+    def from_data(
+        cls, data: dict[str, Any], event_type: str, http: HTTPClient | None = None
+    ) -> RawReactionActionEvent:
         """Create a RawReactionActionEvent from gateway data.
 
         Args:
             data: Decoded payload to parse; omitted fields retain the parser's documented defaults.
             event_type: Event type used by this operation.
+            http: Transport used to build the emoji image URL.
 
         Returns:
             A parsed RawReactionActionEvent instance.
         """
-        emoji = PartialEmoji.from_data(data["emoji"])
+        emoji = PartialEmoji.from_data(data["emoji"], http)
+        guild_id = int(data["guild_id"]) if data.get("guild_id") else None
+        member_data = data.get("member")
         return cls(
             message_id=int(data["message_id"]),
             channel_id=int(data["channel_id"]),
-            guild_id=int(data["guild_id"]) if data.get("guild_id") else None,
+            guild_id=guild_id,
             user_id=int(data["user_id"]),
             emoji=emoji,
             event_type=event_type,
+            member=GuildMember.from_data(member_data, guild_id=guild_id)
+            if isinstance(member_data, dict)
+            and isinstance(member_data.get("user"), dict)
+            else None,
         )
 
 
@@ -324,16 +369,19 @@ class RawReactionClearEmojiEvent:
     emoji: PartialEmoji
 
     @classmethod
-    def from_data(cls, data: dict[str, Any]) -> RawReactionClearEmojiEvent:
+    def from_data(
+        cls, data: dict[str, Any], http: HTTPClient | None = None
+    ) -> RawReactionClearEmojiEvent:
         """Create a RawReactionClearEmojiEvent from gateway data.
 
         Args:
             data: Decoded payload to parse; omitted fields retain the parser's documented defaults.
+            http: Transport used to build the emoji image URL.
 
         Returns:
             A parsed RawReactionClearEmojiEvent instance.
         """
-        emoji = PartialEmoji.from_data(data["emoji"])
+        emoji = PartialEmoji.from_data(data["emoji"], http)
         return cls(
             message_id=int(data["message_id"]),
             channel_id=int(data["channel_id"]),

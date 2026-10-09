@@ -34,7 +34,9 @@ def test_flat_snapshots_parse_on_both_message_models(model: Any) -> None:
         "embeds": [{"title": "example"}],
         "attachments": [
             {
-                "id": "71", "filename": "file.txt", "size": 4,
+                "id": "71",
+                "filename": "file.txt",
+                "size": 4,
                 "url": "https://media.example.test/file.txt",
             }
         ],
@@ -58,8 +60,9 @@ def test_flat_snapshots_parse_on_both_message_models(model: Any) -> None:
     assert int(snapshot.flags) == first["flags"]
     assert snapshot.mentions == [41, 42]
     assert snapshot.mention_roles == [51]
-    assert snapshot.mention_channels == first["mention_channels"]
-    assert snapshot.embeds == first["embeds"]
+    assert [(c.id, c.name) for c in snapshot.mention_channels] == [(61, "general")]
+    assert [e.title for e in snapshot.embeds] == ["example"]
+    assert [e.to_dict() for e in snapshot.embeds] == first["embeds"]
     assert isinstance(snapshot.attachments[0], message_facade.Attachment)
     assert snapshot.attachments[0].id == 71
     assert isinstance(snapshot.stickers[0], fluxer.Sticker)

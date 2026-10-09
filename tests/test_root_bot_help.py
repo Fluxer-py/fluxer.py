@@ -170,7 +170,9 @@ async def test_gateway_message_fires_listener_and_processes_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_root_checks_attach_framework_predicates(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_root_checks_attach_framework_predicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     role_check = AsyncMock(return_value=True)
     permission_check = AsyncMock(return_value=True)
     monkeypatch.setattr(core, "_member_has_role", role_check)

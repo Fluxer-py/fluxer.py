@@ -33,17 +33,13 @@ def test_resolved_reference_is_same_metadata_object(model: Any) -> None:
     assert message.reference.resolved is message.referenced_message
     assert isinstance(message.reference.resolved, Message)
     assert message.reference.resolved.content == "original"
-    assert message.reference.to_dict() == {
-        "message_id": "9", "channel_id": "20"
-    }
+    assert message.reference.to_dict() == {"message_id": "9", "channel_id": "20"}
 
     replacement = Message.from_data(payload(id="8", content="replacement"))
     message.referenced_message = replacement
     assert message.reference.resolved is replacement
     assert message.message_reference.resolved is replacement
-    assert message.reference.to_dict() == {
-        "message_id": "9", "channel_id": "20"
-    }
+    assert message.reference.to_dict() == {"message_id": "9", "channel_id": "20"}
 
 
 @pytest.mark.parametrize("model", [Message, WebhookMessage])

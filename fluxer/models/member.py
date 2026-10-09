@@ -7,16 +7,20 @@ from __future__ import annotations
 
 from .._model_factory import _snapshot
 
-from .._endpoints import asset_url
+from ..asset import Asset
 
 from .._types import UNSET, UnsetType
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from ..file import File
     from ..http import HTTPClient
+    from .channel import Channel
+    from .message import Message
 
 from .user import User
 
@@ -28,13 +32,19 @@ class GuildMember:
     This combines a User object with guild-specific information like
     nickname, roles, join date, etc.
 
+    A member can be used wherever a User is expected: account attributes
+    (``username``, ``bot``, ``avatar_url``, ...) and ``send()``/``create_dm()``
+    delegate to ``user``, and a member compares and hashes equal to the User
+    with the same ID. Guild-specific profile values use ``guild_*`` names, and
+    ``display_name``/``display_avatar`` prefer the guild value.
+
     Attributes:
         user: The account the membership belongs to.
         id: The account ID of this guild member.
         nick: The nickname the account uses in this guild, or null when none is set.
-        avatar_hash: Avatar content hash, or None when no avatar is available.
-        banner: The image hash of the guild-specific banner, or null when none is set.
-        accent_color: The guild profile accent colour as packed 24-bit RGB, or null when none is set.
+        guild_avatar_hash: Guild-specific avatar hash, or None when none is set.
+        guild_banner_hash: Guild-specific banner hash, or None when none is set.
+        guild_accent_color: The guild profile accent colour as packed 24-bit RGB, or null when none is set.
         roles: The IDs of the roles assigned to the membership (max 250).
         joined_at: The time the account became a member of this guild.
         guild_id: Guild identity retained from the payload or operation context.
@@ -45,11 +55,15 @@ class GuildMember:
         deaf: Whether a moderator has deafened the member in voice.
         communication_disabled_until: The time the communication timeout expires, or null when the member is not timed out.
         profile_flags: The guild member profile flags set on the membership.
-        mention_flags: The reply mention preference that applies only inside this guild.
+        guild_mention_flags: The reply mention preference that applies only inside this guild.
         display_name: Guild nickname, or the account's display name.
-        display_avatar: Guild avatar, account avatar, or default avatar URL.
+        display_avatar: Guild avatar, account avatar, or default avatar.
+        display_avatar_url: URL of display_avatar.
         mention: Return a string that mentions this member.
+        guild_avatar: The member's guild-specific avatar, if set.
         guild_avatar_url: URL for the member's guild-specific avatar, if set.
+        guild_banner: The member's guild-specific banner, if set.
+        guild_banner_url: URL for the member's guild-specific banner, if set.
     """
 
     # The underlying user
@@ -57,9 +71,9 @@ class GuildMember:
 
     # Guild-specific fields
     nick: str | None = None  # Guild nickname (overrides global_name)
-    avatar_hash: str | None = None  # Guild-specific avatar hash
-    banner: str | None = None  # Guild-specific banner
-    accent_color: int | None = None  # Guild-specific accent color
+    guild_avatar_hash: str | None = None
+    guild_banner_hash: str | None = None
+    guild_accent_color: int | None = None
     roles: list[int] = field(default_factory=list)  # Role IDs (as ints)
     joined_at: str | None = None  # ISO 8601 timestamp
     guild_id: int | None = None
@@ -78,7 +92,7 @@ class GuildMember:
 
     # Back-reference (set after construction)
     profile_flags: int | None = None
-    mention_flags: int | None = None
+    guild_mention_flags: int | None = None
 
     _http: HTTPClient | None = field(default=None, repr=False)
 
@@ -106,9 +120,9 @@ class GuildMember:
         return cls(
             user=user,
             nick=data.get("nick"),
-            avatar_hash=data.get("avatar"),
-            banner=data.get("banner"),
-            accent_color=data.get("accent_color"),
+            guild_avatar_hash=data.get("avatar"),
+            guild_banner_hash=data.get("banner"),
+            guild_accent_color=data.get("accent_color"),
             roles=[int(role_id) for role_id in data.get("roles", [])],
             joined_at=data.get("joined_at"),
             join_source_type=data.get("join_source_type"),
@@ -120,7 +134,7 @@ class GuildMember:
             guild_id=guild_id
             or (int(data["guild_id"]) if data.get("guild_id") else None),
             profile_flags=data.get("profile_flags", None),
-            mention_flags=data.get("mention_flags", None),
+            guild_mention_flags=data.get("mention_flags", None),
             _http=http,
         )
 
@@ -145,20 +159,25 @@ class GuildMember:
         return self.nick or self.user.display_name
 
     @property
-    def display_avatar(self) -> str:
-        """Return the best available avatar URL for this member.
+    def display_avatar(self) -> Asset:
+        """The avatar shown for this member in the guild.
 
-        Guild avatars take precedence over account avatars; members without
-        either use the account's generated default avatar.
+        The guild avatar takes precedence over the account avatar; a member with
+        neither shows the account's default avatar.
 
         Returns:
-            The guild, account, or default avatar URL.
+            The guild, account, or default avatar asset.
         """
-        return (
-            self.guild_avatar_url
-            or self.user.avatar_url
-            or self.user.default_avatar_url
-        )
+        return self.guild_avatar or self.user.display_avatar
+
+    @property
+    def display_avatar_url(self) -> str:
+        """URL of :attr:`display_avatar`.
+
+        Returns:
+            The URL of the avatar shown for this member.
+        """
+        return self.display_avatar.url
 
     @property
     def mention(self) -> str:
@@ -170,22 +189,276 @@ class GuildMember:
         return f"<@{self.user.id}>"
 
     @property
-    def guild_avatar_url(self) -> str | None:
-        """URL for the member's guild-specific avatar, if set.
+    def guild_avatar(self) -> Asset | None:
+        """The member's guild-specific avatar, or None when none is set.
 
         Returns:
-            The result of this operation.
+            The guild avatar asset, when set.
         """
-        if self.avatar_hash:
-            ext = "gif" if self.avatar_hash.startswith("a_") else "png"
-            # Note: Guild avatar URLs might have a different format
-            # Adjust if Fluxer uses a different URL structure
-            return asset_url(
-                self._http,
-                "media",
-                f"guilds/{self.guild_id}/users/{self.user.id}/avatars/{self.avatar_hash}.{ext}",
+        if self.guild_avatar_hash:
+            return Asset._from_guild_member_avatar(
+                self._http, self.guild_id, self.user.id, self.guild_avatar_hash
             )
         return None
+
+    @property
+    def guild_avatar_url(self) -> str | None:
+        """URL of :attr:`guild_avatar`, or None when none is set.
+
+        Returns:
+            The guild avatar URL, when set.
+        """
+        avatar = self.guild_avatar
+        return avatar.url if avatar else None
+
+    @property
+    def guild_banner(self) -> Asset | None:
+        """The member's guild-specific profile banner, or None when none is set.
+
+        Returns:
+            The guild banner asset, when set.
+        """
+        if self.guild_banner_hash:
+            return Asset._from_guild_member_banner(
+                self._http, self.guild_id, self.user.id, self.guild_banner_hash
+            )
+        return None
+
+    @property
+    def guild_banner_url(self) -> str | None:
+        """URL of :attr:`guild_banner`, or None when none is set.
+
+        Returns:
+            The guild banner URL, when set.
+        """
+        banner = self.guild_banner
+        return banner.url if banner else None
+
+    # -- User delegation: lets a member stand in for its User --
+
+    @property
+    def username(self) -> str:
+        """The account username (see :attr:`User.username`).
+
+        Returns:
+            The account username.
+        """
+        return self.user.username
+
+    @property
+    def discriminator(self) -> str | None:
+        """The account discriminator (see :attr:`User.discriminator`).
+
+        Returns:
+            The account discriminator, when known.
+        """
+        return self.user.discriminator
+
+    @property
+    def global_name(self) -> str | None:
+        """The account display name (see :attr:`User.global_name`).
+
+        Returns:
+            The account display name, when set.
+        """
+        return self.user.global_name
+
+    @property
+    def avatar_hash(self) -> str | None:
+        """The account avatar hash; the guild avatar is :attr:`guild_avatar_hash`.
+
+        Returns:
+            The account avatar hash, when set.
+        """
+        return self.user.avatar_hash
+
+    @property
+    def avatar_color(self) -> int | None:
+        """The account avatar colour (see :attr:`User.avatar_color`).
+
+        Returns:
+            The packed RGB colour, when known.
+        """
+        return self.user.avatar_color
+
+    @property
+    def banner_hash(self) -> str | None:
+        """The account banner hash; the guild banner is :attr:`guild_banner_hash`.
+
+        Returns:
+            The account banner hash, when set.
+        """
+        return self.user.banner_hash
+
+    @property
+    def banner_color(self) -> int | None:
+        """The account banner colour (see :attr:`User.banner_color`).
+
+        Returns:
+            The packed RGB colour, when known.
+        """
+        return self.user.banner_color
+
+    @property
+    def accent_color(self) -> int | None:
+        """The account accent colour; the guild value is :attr:`guild_accent_color`.
+
+        Returns:
+            The packed RGB colour, when set.
+        """
+        return self.user.accent_color
+
+    @property
+    def mention_flags(self) -> int | None:
+        """The account reply mention preference; see :attr:`guild_mention_flags`.
+
+        Returns:
+            The account-level preference, when set.
+        """
+        return self.user.mention_flags
+
+    @property
+    def bot(self) -> bool:
+        """Whether the account is a bot (see :attr:`User.bot`).
+
+        Returns:
+            Whether the account is a bot.
+        """
+        return self.user.bot
+
+    @property
+    def system(self) -> bool:
+        """Whether the account is a Fluxer system account (see :attr:`User.system`).
+
+        Returns:
+            Whether the account is a system account.
+        """
+        return self.user.system
+
+    @property
+    def flags(self) -> int:
+        """Public account flags (see :attr:`User.flags`).
+
+        Returns:
+            The public flag mask.
+        """
+        return self.user.flags
+
+    @property
+    def bio(self) -> str | None:
+        """The account biography (see :attr:`User.bio`).
+
+        Returns:
+            The biography, when known.
+        """
+        return self.user.bio
+
+    @property
+    def pronouns(self) -> str | None:
+        """The account pronouns (see :attr:`User.pronouns`).
+
+        Returns:
+            The pronouns, when known.
+        """
+        return self.user.pronouns
+
+    @property
+    def created_at(self) -> datetime:
+        """When the account was created (see :attr:`User.created_at`).
+
+        Returns:
+            The account creation time.
+        """
+        return self.user.created_at
+
+    @property
+    def avatar(self) -> Asset | None:
+        """The account avatar; :attr:`guild_avatar` is the guild-specific one.
+
+        Returns:
+            The account avatar asset, when set.
+        """
+        return self.user.avatar
+
+    @property
+    def default_avatar(self) -> Asset:
+        """The account's default avatar (see :attr:`User.default_avatar`).
+
+        Returns:
+            The default avatar asset.
+        """
+        return self.user.default_avatar
+
+    @property
+    def banner(self) -> Asset | None:
+        """The account banner; :attr:`guild_banner` is the guild-specific one.
+
+        Returns:
+            The account banner asset, when set.
+        """
+        return self.user.banner
+
+    @property
+    def avatar_url(self) -> str | None:
+        """The account avatar URL; :attr:`display_avatar` prefers the guild avatar.
+
+        Returns:
+            The account avatar URL, or None when the default avatar is used.
+        """
+        return self.user.avatar_url
+
+    @property
+    def default_avatar_url(self) -> str:
+        """The account's default avatar URL (see :attr:`User.default_avatar_url`).
+
+        Returns:
+            The default avatar URL.
+        """
+        return self.user.default_avatar_url
+
+    @property
+    def banner_url(self) -> str | None:
+        """The account banner URL (see :attr:`User.banner_url`).
+
+        Returns:
+            The account banner URL, when set.
+        """
+        return self.user.banner_url
+
+    async def create_dm(self) -> Channel:
+        """Open a DM channel with this member's account.
+
+        Returns:
+            The Channel object for the DM.
+        """
+        return await self.user.create_dm()
+
+    async def send(
+        self,
+        content: str | None = None,
+        *,
+        embed: Any | None = None,
+        embeds: list[Any] | None = None,
+        file: File | None = None,
+        files: list[File] | None = None,
+        **kwargs: Any,
+    ) -> Message:
+        """Send a DM to this member's account.
+
+        Args:
+            content: The message content.
+            embed: A single embed to include.
+            embeds: Multiple embeds to include.
+            file: A single File object to attach.
+            files: Multiple File objects to attach.
+            **kwargs: Additional options forwarded to the underlying operation.
+
+        Returns:
+            The sent Message object.
+        """
+        return await self.user.send(
+            content, embed=embed, embeds=embeds, file=file, files=files, **kwargs
+        )
 
     # -- Role Management Methods --
     async def add_role(self, role_id: int, *, reason: str | None = None) -> None:
@@ -357,7 +630,8 @@ class GuildMember:
             communication_disabled_until=communication_disabled_until,
             reason=reason,
         )
-        updated = _snapshot(GuildMember.from_data,
+        updated = _snapshot(
+            GuildMember.from_data,
             {"user": {"id": str(self.user.id)}, **data},
             self._http,
             guild_id=self.guild_id,
@@ -365,6 +639,27 @@ class GuildMember:
         if "user" not in data:
             updated.user = deepcopy(self.user, {id(self._http): self._http})
         return updated
+
+    def __eq__(self, other: object) -> bool:
+        """Compare by account ID with another member or a User.
+
+        Args:
+            other: Other operand used for comparison.
+
+        Returns:
+            Whether both refer to the same account.
+        """
+        if isinstance(other, (GuildMember, User)):
+            return self.id == other.id
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        """Hash by account ID, matching the equivalent User.
+
+        Returns:
+            The account ID hash.
+        """
+        return hash(self.id)
 
     def __str__(self) -> str:
         """Return the member's display name.

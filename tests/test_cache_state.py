@@ -69,8 +69,7 @@ async def test_entity_identity_views_updates_and_removal() -> None:
     assert view[0] is member and list(view[:1]) == [member]
     await client._dispatch("MESSAGE_CREATE", message_payload(member={"roles": ["4"]}))
     message = _required(client.get_message(10))
-    assert message.author is member.user
-    assert message.member is member
+    assert message.author is message.member is member
     await client._dispatch(
         "GUILD_MEMBER_UPDATE",
         {"guild_id": "1", "user": {"id": "3", "username": "new"}, "nick": "new"},
@@ -426,8 +425,8 @@ async def test_http_snapshots_and_late_response_leave_live_state_intact() -> Non
     snapshot = await client.fetch_message("2", "10")
     live = _required(client.get_message(10))
     assert snapshot is not live and snapshot.author is not live.author
-    snapshot.embeds[0]["fields"][0]["value"] = "changed"
-    assert live.embeds[0]["fields"][0]["value"] == "old"
+    snapshot.embeds[0].fields[0].value = "changed"
+    assert live.embeds[0].fields[0].value == "old"
     gate = asyncio.Event()
 
     async def delayed(*args: Any) -> dict[str, Any]:
@@ -622,8 +621,11 @@ async def test_guild_sync_preserves_voice_identity_and_reconciles_indexes() -> N
     client = fluxer.Client()
     await client._dispatch("GUILD_CREATE", guild_payload())
     payload = {
-        "guild_id": "1", "user_id": "3", "channel_id": "2",
-        "connection_id": "a", "version": 1,
+        "guild_id": "1",
+        "user_id": "3",
+        "channel_id": "2",
+        "connection_id": "a",
+        "version": 1,
     }
     current = client._store_voice_state(payload)
     client._store_voice_state({**payload, "connection_id": "b"})
@@ -662,8 +664,12 @@ async def test_member_edit_returns_snapshot_without_replacing_live_user(
     async def late_response(*args: Any, **kwargs: Any) -> dict[str, Any]:
         await client._dispatch(
             "GUILD_MEMBER_UPDATE",
-            {"guild_id": "1", "user": {"id": "3", "username": "gateway-new"},
-             "nick": "gateway-new", "roles": []},
+            {
+                "guild_id": "1",
+                "user": {"id": "3", "username": "gateway-new"},
+                "nick": "gateway-new",
+                "roles": [],
+            },
         )
         return response
 
@@ -698,7 +704,9 @@ async def test_shutdown_releases_cache_even_when_transport_close_fails(
     await client._dispatch("MESSAGE_CREATE", message_payload())
     client._state._track_member_request(1, "pending", True)
     request = client._state._member_requests[1]
-    (gateway if failure == "gateway" else http).close.side_effect = RuntimeError(failure)
+    (gateway if failure == "gateway" else http).close.side_effect = RuntimeError(
+        failure
+    )
     with pytest.raises(RuntimeError, match=failure):
         await client.close()
     assert not client.guilds and not client._state.channels

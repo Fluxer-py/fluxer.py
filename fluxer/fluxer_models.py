@@ -335,7 +335,8 @@ class SavedMessage:
         message_data = payload.get("message")
         message = None
         if isinstance(message_data, dict):
-            from .models import Message
+            # Circular import: fluxer.models imports this module (via models.channel).
+            from .models import Message  # noqa: PLC0415
 
             message = _snapshot(Message.from_data, message_data, http)
         return cls(
@@ -443,7 +444,8 @@ class Mention:
         payload = _unwrap(data, "mention", "message")
         message = None
         if "content" in payload and "author" in payload:
-            from .models import Message
+            # Circular import: fluxer.models imports this module (via models.channel).
+            from .models import Message  # noqa: PLC0415
 
             message = _snapshot(Message.from_data, payload, http)
         return cls(
@@ -499,7 +501,8 @@ class Relationship:
         user_data = payload.get("user")
         user = None
         if isinstance(user_data, dict):
-            from .models import User
+            # Circular import: fluxer.models imports this module (via models.channel).
+            from .models import User  # noqa: PLC0415
 
             user = _snapshot(User.from_data, user_data, http)
         return cls(
@@ -656,7 +659,8 @@ class SearchResult:
         Returns:
             A parsed SearchResult instance.
         """
-        from .models import Channel, Message
+        # Circular import: fluxer.models imports this module (via models.channel).
+        from .models import Channel, Message  # noqa: PLC0415
 
         raw_messages = data.get("messages", data.get("results", []))
         raw_channels = data.get("channels") or []
@@ -875,7 +879,8 @@ class GiftCode:
             A parsed GiftCode instance.
         """
         payload = _unwrap(data, "gift", "gift_code")
-        from .models import User
+        # Circular import: fluxer.models imports this module (via models.channel).
+        from .models import User  # noqa: PLC0415
 
         created_by_data = payload.get("created_by")
         redeemed_by_data = payload.get("redeemed_by")
@@ -1236,7 +1241,8 @@ class BanEntry:
             A parsed BanEntry instance.
         """
         payload = _unwrap(data, "ban")
-        from .models import User
+        # Circular import: fluxer.models imports this module (via models.channel).
+        from .models import User  # noqa: PLC0415
 
         return cls(
             user=_snapshot(User.from_data, payload["user"], http),
@@ -1643,13 +1649,12 @@ class AppInfo:
             A parsed AppInfo instance.
         """
         payload = _unwrap(data, "application", "app")
-        from .models import User
+        # Circular import: fluxer.models imports this module (via models.channel).
+        from .models import User  # noqa: PLC0415
 
         bot_data = payload.get("bot")
         bot = None
         if isinstance(bot_data, dict):
-            from .models import User
-
             bot = _snapshot(User.from_data, bot_data, http)
         team_data = payload.get("team")
         return cls(
@@ -1752,12 +1757,14 @@ class MFAState:
     Attributes:
         totp: Whether TOTP proof is available.
         webauthn: Whether WebAuthn proof is available.
+        backup_codes: Whether the account holds at least one unconsumed backup code.
         has_mfa: Whether the account has an enrolled authenticator.
         raw_data: Original payload retained for privacy-controlled, variant-specific, or unmodeled fields; excluded from repr.
     """
 
     totp: bool | None = None
     webauthn: bool | None = None
+    backup_codes: bool | None = None
     has_mfa: bool | None = None
     raw_data: dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -1779,6 +1786,7 @@ class MFAState:
         return cls(
             totp=methods.get("totp"),
             webauthn=methods.get("webauthn"),
+            backup_codes=methods.get("backup_codes"),
             has_mfa=payload.get("has_mfa"),
             raw_data=data,
         )
@@ -1793,6 +1801,7 @@ class WebAuthnCredential:
         name: User-assigned credential name (1-100 characters).
         created_at: The time Register WebAuthn credential stored the credential.
         last_used_at: Most recent successful authentication.
+        rp_id: The domain the passkey was created for.
         raw_data: Original payload retained for privacy-controlled, variant-specific, or unmodeled fields; excluded from repr.
     """
 
@@ -1800,6 +1809,7 @@ class WebAuthnCredential:
     name: str | None = None
     created_at: str | None = None
     last_used_at: str | None = None
+    rp_id: str | None = None
     raw_data: dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -1821,6 +1831,7 @@ class WebAuthnCredential:
             name=payload.get("name"),
             created_at=payload.get("created_at"),
             last_used_at=payload.get("last_used_at"),
+            rp_id=payload.get("rp_id"),
             raw_data=data,
         )
 

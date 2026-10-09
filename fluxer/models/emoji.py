@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from ..asset import Asset, _AssetBacked
 from .user import User
 
 if TYPE_CHECKING:
@@ -15,13 +16,15 @@ if TYPE_CHECKING:
 
 
 @dataclass(slots=True)
-class Emoji:
+class Emoji(_AssetBacked):
     """Represents a custom emoji in a Fluxer guild.
 
     Attributes:
         id: Identity of the object used by this operation.
         name: Name to assign or resolve in this operation.
         animated: Whether the stored image is animated.
+        asset: The emoji image.
+        url: URL of the emoji image.
         guild_id: Guild identity retained from the payload or operation context.
         roles: Compatibility list; Fluxer expressions have no role restrictions.
         managed: Compatibility flag defaulting to False; not a Fluxer expression field.
@@ -94,6 +97,27 @@ class Emoji:
             raise RuntimeError("Cannot delete emoji without guild_id")
 
         await self._http.delete_guild_emoji(self.guild_id, self.id, reason=reason)
+
+    @property
+    def asset(self) -> Asset:
+        """The emoji image.
+
+        Returns:
+            The image asset; animated emojis request animated output.
+        """
+        return Asset._from_emoji(self._http, self.id, self.animated)
+
+    @property
+    def url(self) -> str:
+        """URL of the emoji image.
+
+        Returns:
+            The image URL.
+        """
+        return self.asset.url
+
+    def _require_asset(self) -> Asset:
+        return self.asset
 
     def __str__(self) -> str:
         """Return the object's user-facing text representation.

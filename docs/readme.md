@@ -76,8 +76,9 @@ Forwarded messages expose `message.message_snapshots` as a list of
 `MessageSnapshot` objects; webhook messages use the same model. Each snapshot
 has the original `timestamp` string and a `created_at` datetime, plus optional
 `edited_timestamp` and `edited_at`. `mentions` and `mention_roles` contain
-integer IDs. `attachments` and `stickers` are parsed models, `flags` is a
-`MessageFlags` mask, and `embeds` and `mention_channels` remain dictionaries.
+integer IDs. `attachments`, `stickers`, `embeds` (`Embed`), and
+`mention_channels` (`ChannelMention`) are parsed models, and `flags` is a
+`MessageFlags` mask.
 Optional collections are empty when omitted. `raw_data` retains the original
 snapshot fields, including fields without typed properties. A snapshot contains
 only the fields supplied by Fluxer; it does not resolve a source message.
@@ -102,6 +103,39 @@ for attachment in message.attachments:
 Use `int(model.flags)` or `model.flags.value` to read the complete mask,
 including bits without named properties. Attachment payload serialization
 still writes an integer mask.
+
+## Images and assets
+
+Images served by the Fluxer Media Proxy are exposed as `Asset` objects:
+`user.avatar`, `user.banner`, `member.display_avatar`, `member.guild_avatar`,
+`guild.icon`, `guild.banner`, `guild.splash`, `emoji.asset`, `sticker.asset`,
+and more. A property is `None` when the image is not set. Each also has a
+`*_url` string shortcut, such as `user.avatar_url` or `guild.icon_url`. The raw
+image hashes stay available as `*_hash` fields, such as `guild.icon_hash`.
+
+```py
+avatar = member.display_avatar  # guild avatar, account avatar, or default
+print(avatar.url)
+thumb = avatar.with_size(256).with_static_format("webp")
+data = await thumb.read()
+await avatar.save("avatar.png")
+await channel.send(file=await avatar.to_file(filename="avatar.png"))
+```
+
+- `with_size()` requests an edge length. The Media Proxy rounds it up to its
+  next supported step and keeps it within the limits for that kind of image.
+- `with_format()` accepts `png`, `jpg`, `jpeg`, `webp`, `gif`, `apng`, and
+  `avif`. `with_static_format()` changes only non-animated images.
+- Default avatars come from the instance's static CDN and are not transformed,
+  so the `with_*` methods return them unchanged.
+- Animated avatars, icons, and banners (hashes starting with `a_`) default to
+  `gif`. Emojis and stickers use `webp` and request animation when animated.
+- Building a URL needs a client bound to an instance (`instance_url`). An
+  unbound model raises `RuntimeError` when its URL is read.
+
+Attachments are not rebuilt from a hash. `attachment.read()`, `save()`, and
+`to_file()` download the URL Fluxer issued. Pass `use_cached=True` to use
+`proxy_url` instead.
 
 ---
 

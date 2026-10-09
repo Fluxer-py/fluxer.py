@@ -12,6 +12,7 @@ from fluxer.models.member import GuildMember
 
 
 async def main():
+    """Fetch a guild member and print their nickname and roles."""
     token = "bot_token"
 
     if len(sys.argv) < 3:

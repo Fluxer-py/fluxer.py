@@ -1,6 +1,4 @@
-"""
-This is a basic bot example that you can copy-paste for quick usage, it's recommended to copy the whole `bot_basic` folder.
-
+"""This is a basic bot example that you can copy-paste for quick usage, it's recommended to copy the whole `bot_basic` folder.
 
 This example is heavily based on https://github.com/PerpetualPossum/fluxer-py-template, check that out!
 

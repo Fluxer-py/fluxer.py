@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from .._model_factory import _snapshot
 
-from .._endpoints import asset_url
+from ..asset import Asset
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,6 +21,37 @@ if TYPE_CHECKING:
     from ..http import HTTPClient
     from .channel import Channel
     from .message import Message
+
+
+@dataclass(slots=True)
+class PendingBulkMessageDeletion:
+    """A message deletion the account scheduled for itself.
+
+    Attributes:
+        scheduled_at: When the deletion runs (ISO 8601).
+        channel_count: Number of channels with messages to delete.
+        message_count: Number of messages to delete.
+    """
+
+    scheduled_at: str
+    channel_count: int = 0
+    message_count: int = 0
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> PendingBulkMessageDeletion:
+        """Build a PendingBulkMessageDeletion from its decoded payload.
+
+        Args:
+            data: Pending bulk message deletion object.
+
+        Returns:
+            The parsed pending deletion.
+        """
+        return cls(
+            scheduled_at=data.get("scheduled_at", ""),
+            channel_count=data.get("channel_count", 0),
+            message_count=data.get("message_count", 0),
+        )
 
 
 @dataclass(slots=True)
@@ -90,7 +121,12 @@ class User(_WeakRefable):
         created_at: When this user account was created (derived from Snowflake).
         display_name: The best display name for this user.
         mention: Return a string that mentions this user in a message.
+        avatar: The user's avatar, or None if they use the default.
+        default_avatar: The default avatar Fluxer shows for this user.
+        display_avatar: The user's avatar, or the default avatar.
+        banner: The user's profile banner, or None.
         avatar_url: URL for the user's avatar, or None if they use the default.
+        display_avatar_url: URL of display_avatar.
         default_avatar_url: URL for the user's default avatar.
         banner_url: URL for the user's banner, or None if they don't have one.
     """
@@ -147,7 +183,7 @@ class User(_WeakRefable):
     traits: list[str] = field(default_factory=list)
     required_actions: list[str] = field(default_factory=list)
     authenticator_types: list[int] = field(default_factory=list)
-    pending_bulk_message_deletion: dict[str, Any] | None = None
+    pending_bulk_message_deletion: PendingBulkMessageDeletion | None = None
 
     _http: HTTPClient | None = field(default=None, repr=False)
 
@@ -226,9 +262,11 @@ class User(_WeakRefable):
             traits=list(data.get("traits", [])),
             required_actions=list(data.get("required_actions", [])),
             authenticator_types=list(data.get("authenticator_types", [])),
-            pending_bulk_message_deletion=data.get(
-                "pending_bulk_message_deletion", None
-            ),
+            pending_bulk_message_deletion=PendingBulkMessageDeletion.from_data(
+                data["pending_bulk_message_deletion"]
+            )
+            if isinstance(data.get("pending_bulk_message_deletion"), dict)
+            else None,
             premium_badge_hidden=data.get("premium_badge_hidden"),
             premium_badge_masked=data.get("premium_badge_masked"),
             premium_badge_timestamp_hidden=data.get("premium_badge_timestamp_hidden"),
@@ -271,42 +309,82 @@ class User(_WeakRefable):
         return f"<@{self.id}>"
 
     @property
-    def avatar_url(self) -> str | None:
-        """URL for the user's avatar, or None if they use the default.
+    def avatar(self) -> Asset | None:
+        """The user's avatar, or None when they use the default avatar.
 
         Returns:
-            The result of this operation.
+            The avatar asset, when the user has set one.
         """
         if self.avatar_hash:
-            ext = "gif" if self.avatar_hash.startswith("a_") else "png"
-            return asset_url(
-                self._http, "media", f"avatars/{self.id}/{self.avatar_hash}.{ext}"
-            )
+            return Asset._from_avatar(self._http, self.id, self.avatar_hash)
         return None
+
+    @property
+    def default_avatar(self) -> Asset:
+        """The default avatar Fluxer shows for this user.
+
+        Returns:
+            The default avatar asset.
+        """
+        return Asset._from_default_avatar(self._http, self.id)
+
+    @property
+    def display_avatar(self) -> Asset:
+        """The avatar shown for this user: their own, or the default one.
+
+        Returns:
+            The avatar asset, falling back to the default avatar.
+        """
+        return self.avatar or self.default_avatar
+
+    @property
+    def banner(self) -> Asset | None:
+        """The user's profile banner, or None when they have none.
+
+        Returns:
+            The banner asset, when the user has one.
+        """
+        if self.banner_hash:
+            return Asset._from_banner(self._http, self.id, self.banner_hash)
+        return None
+
+    @property
+    def avatar_url(self) -> str | None:
+        """URL of :attr:`avatar`, or None if the user has the default avatar.
+
+        Returns:
+            The avatar URL, when the user has set an avatar.
+        """
+        avatar = self.avatar
+        return avatar.url if avatar else None
 
     @property
     def default_avatar_url(self) -> str:
-        """URL for the user's default avatar.
+        """URL of :attr:`default_avatar`.
 
         Returns:
-            The result of this operation.
+            The default avatar URL.
         """
-        index = int(self.id) % 6
-        return asset_url(self._http, "static_cdn", f"avatars/{index}.png")
+        return self.default_avatar.url
+
+    @property
+    def display_avatar_url(self) -> str:
+        """URL of :attr:`display_avatar`.
+
+        Returns:
+            The URL of the avatar shown for this user.
+        """
+        return self.display_avatar.url
 
     @property
     def banner_url(self) -> str | None:
-        """URL for the user's banner, or None if they don't have one.
+        """URL of :attr:`banner`, or None if the user has no banner.
 
         Returns:
-            The result of this operation.
+            The banner URL, when the user has a banner.
         """
-        if self.banner_hash:
-            ext = "gif" if self.banner_hash.startswith("a_") else "png"
-            return asset_url(
-                self._http, "media", f"banners/{self.id}/{self.banner_hash}.{ext}"
-            )
-        return None
+        banner = self.banner
+        return banner.url if banner else None
 
     async def create_dm(self) -> Channel:
         """Open a DM channel with this user.
@@ -316,7 +394,8 @@ class User(_WeakRefable):
         Returns:
             The Channel object for the DM.
         """
-        from .channel import Channel
+        # Circular import: models.channel imports this module at top level.
+        from .channel import Channel  # noqa: PLC0415
 
         if self._http is None:
             raise RuntimeError("User is not bound to an HTTP client")
@@ -362,7 +441,10 @@ class User(_WeakRefable):
         Returns:
             Whether the documented condition holds for the current state.
         """
-        return isinstance(other, User) and self.id == other.id
+        if isinstance(other, User):
+            return self.id == other.id
+        # Defer to the other operand so a GuildMember compares equal by ID.
+        return NotImplemented
 
     def __hash__(self) -> int:
         """Return the hash used for identity-based collection lookup.
@@ -383,4 +465,4 @@ class User(_WeakRefable):
         return self.global_name or self.username
 
 
-__all__ = ("User",)
+__all__ = ("PendingBulkMessageDeletion", "User")

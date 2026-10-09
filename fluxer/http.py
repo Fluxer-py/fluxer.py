@@ -6,13 +6,16 @@ preserves response variants, credential scope and rate-limit retry information.
 
 from __future__ import annotations
 import asyncio
+import base64
 import json as json_mod
 import logging
 import math
+import re
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 import aiohttp
+import emoji as emoji_lib
 from ._endpoints import Endpoints
 from ._types import UNSET, UnsetType, PinPage
 from .models.embed import Embed
@@ -47,7 +50,9 @@ def _payload_value(value: Any) -> Any:
 
 
 def _get_user_agent() -> str:
-    from . import __version__
+    # Circular import: fluxer/__init__ imports this module, so read the version
+    # at call time rather than while the package is still initializing.
+    from . import __version__  # noqa: PLC0415
 
     return f"fluxer.py/{__version__} (https://github.com/akarealemil/fluxer.py)"
 
@@ -1249,8 +1254,6 @@ class HTTPClient:
         Returns:
             Guild object
         """
-        import base64
-
         payload: dict[str, Any] = {"name": name}
         if icon:
             image_data = base64.b64encode(icon).decode("ascii")
@@ -1299,8 +1302,6 @@ class HTTPClient:
         Returns:
             The result of this operation.
         """
-        import base64
-
         payload: dict[str, Any] = {}
         if name is not None:
             payload["name"] = name
@@ -1915,8 +1916,6 @@ class HTTPClient:
         Returns:
             Updated user object
         """
-        import base64
-
         payload: dict[str, Any] = {}
         if username is not None:
             payload["username"] = username
@@ -2002,8 +2001,6 @@ class HTTPClient:
         Returns:
             Emoji object
         """
-        import base64
-
         image_data = base64.b64encode(image).decode("ascii")
         if image.startswith(b"\x89PNG"):
             mime_type = "image/png"
@@ -2103,8 +2100,6 @@ class HTTPClient:
         Returns:
             Sticker object
         """
-        import base64
-
         image_data = base64.b64encode(image).decode("ascii")
         if image.startswith(b"\x89PNG"):
             mime_type = "image/png"
@@ -2787,9 +2782,6 @@ class HTTPClient:
         )
 
     def _emoji_to_url_format(self, emoji: Any) -> str:
-        import re
-        import emoji as emoji_lib
-
         if getattr(emoji, "id", None) is not None:
             return f"{emoji.name}:{emoji.id}"
         value = (

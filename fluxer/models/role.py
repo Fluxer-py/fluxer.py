@@ -32,6 +32,7 @@ class Role:
         managed: Managed used by this operation.
         mentionable: Whether members may mention this role.
         hoist_position: Separate display position of a hoisted role, or None.
+        unicode_emoji: The Unicode emoji shown beside the role name, or None.
         guild_id: Guild identity retained from the payload or operation context.
         created_at: When this role was created (derived from Snowflake).
         mention: Return a string that mentions this role in a message.
@@ -48,6 +49,7 @@ class Role:
     mentionable: bool = False  # Whether role can be mentioned
 
     hoist_position: int | None = None
+    unicode_emoji: str | None = None
 
     # Guild reference
     guild_id: int | None = None
@@ -78,6 +80,7 @@ class Role:
             color=data.get("color", 0),
             hoist=data.get("hoist", False),
             hoist_position=data.get("hoist_position"),
+            unicode_emoji=data.get("unicode_emoji"),
             position=data.get("position", 0),
             permissions=int(data.get("permissions", 0)),
             managed=data.get("managed", False),

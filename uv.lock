@@ -352,7 +352,7 @@ wheels = [
 
 [[package]]
 name = "fluxer-py"
-version = "0.5.0a4"
+version = "0.5.0a5"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

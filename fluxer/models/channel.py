@@ -23,9 +23,13 @@ from ..permissions import (
     parse_permission_overwrite,
 )
 from ..utils import process_embed_args
+from .member import GuildMember
+from .message import Message, PartialMessage
+from .role import Role
 from .user import User
 
 from ..enums import ChannelType
+from ..invite import Invite
 from ..fluxer_models import (
     SearchAuthorType,
     SearchContentType,
@@ -39,16 +43,12 @@ from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
     from ..state import ConnectionState
-    from ..invite import Invite
     from ..client import Client
     from ..file import File
     from ..http import HTTPClient
     from ..voice import VoiceClient
     from .embed import Embed
     from .guild import Guild
-    from .member import GuildMember
-    from .message import Message, PartialMessage
-    from .role import Role
 
 
 class _TypingContext:
@@ -83,7 +83,7 @@ class Channel:
         nsfw: Whether the channel has its own age restriction, present only for a guild channel.
         parent_id: The ID of the parent category, null when the channel sits at the top level.
         url: The destination URL, present only for a guild link channel.
-        icon: The icon hash, present only for a group direct message.
+        icon_hash: The icon hash, present only for a group direct message.
         rtc_region: The ID of the selected RTC region, present only for a guild voice channel.
         last_pin_timestamp: The time a message was most recently pinned, or null when nothing has ever been pinned.
         content_warning_text: The content warning text stored on this channel, or null when the channel inherits.
@@ -118,7 +118,7 @@ class Channel:
     parent_id: int | None = None
 
     url: str | None = None
-    icon: str | None = None
+    icon_hash: str | None = None
     rtc_region: str | None = None
     last_pin_timestamp: str | None = None
     content_warning_text: str | None = None
@@ -161,7 +161,7 @@ class Channel:
             nsfw=data.get("nsfw", False),
             parent_id=int(data["parent_id"]) if data.get("parent_id") else None,
             url=data.get("url", None),
-            icon=data.get("icon", None),
+            icon_hash=data.get("icon", None),
             rtc_region=data.get("rtc_region", None),
             last_pin_timestamp=data.get("last_pin_timestamp", None),
             content_warning_text=data.get("content_warning_text", None),
@@ -198,7 +198,11 @@ class Channel:
         """
         if self._guild is not None:
             return self._guild
-        return self._state.guilds.get(self.guild_id) if self._state is not None and self.guild_id is not None else None
+        return (
+            self._state.guilds.get(self.guild_id)
+            if self._state is not None and self.guild_id is not None
+            else None
+        )
 
     @property
     def mention(self) -> str:
@@ -281,9 +285,6 @@ class Channel:
         target: Role | GuildMember | User | int,
         overwrite_type: PermissionOverwriteType | int | None,
     ) -> tuple[int, PermissionOverwriteType]:
-        from .member import GuildMember
-        from .role import Role
-
         guild = self._require_guild_context()
         explicit_type: PermissionOverwriteType | None = None
         if overwrite_type is not None:
@@ -364,8 +365,6 @@ class Channel:
             TypeError: The channel is private or the argument is unsupported.
             RuntimeError: Required membership, ownership, roles, or channel context is incomplete.
         """
-        from .member import GuildMember
-
         guild = self._require_guild_context()
         member: GuildMember | None
         if isinstance(member_or_user, GuildMember):
@@ -376,7 +375,9 @@ class Channel:
             member = guild.get_member(member_or_user.id)
             if member is None:
                 if not guild.member_cache_complete:
-                    raise RuntimeError("Guild member cache is incomplete; supply a GuildMember or request the full roster")
+                    raise RuntimeError(
+                        "Guild member cache is incomplete; supply a GuildMember or request the full roster"
+                    )
                 return Permissions(0)
         else:
             raise TypeError("permissions_for requires a GuildMember or User")
@@ -387,7 +388,9 @@ class Channel:
             return Permissions((1 << 64) - 1)
 
         required_role_ids = {guild.id, *member.roles}
-        missing_role_ids = {role_id for role_id in required_role_ids if guild.get_role(role_id) is None}
+        missing_role_ids = {
+            role_id for role_id in required_role_ids if guild.get_role(role_id) is None
+        }
         if missing_role_ids:
             missing = ", ".join(str(role_id) for role_id in sorted(missing_role_ids))
             raise RuntimeError(f"Guild role snapshot is incomplete; missing: {missing}")
@@ -395,8 +398,11 @@ class Channel:
         return _effective_permissions(
             {"id": guild.id, "owner_id": guild.owner_id},
             {"roles": member.roles},
-            [{"id": role.id, "permissions": role.permissions}
-             for role_id in required_role_ids if (role := guild.get_role(role_id)) is not None],
+            [
+                {"id": role.id, "permissions": role.permissions}
+                for role_id in required_role_ids
+                if (role := guild.get_role(role_id)) is not None
+            ],
             member.user.id,
             {"permission_overwrites": self.permission_overwrites},
         )
@@ -508,9 +514,6 @@ class Channel:
             embed = Embed(title="Title")
             await channel.send(embed=embed, file=File("data.json"))
         """
-        # Import here to avoid circular imports
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -547,8 +550,6 @@ class Channel:
         Returns:
             The fetched Message object.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -567,8 +568,6 @@ class Channel:
         Returns:
             A list of Message objects.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -588,8 +587,6 @@ class Channel:
         Returns:
             The requested partial message.
         """
-        from .message import PartialMessage
-
         return PartialMessage(
             channel_id=self.id,
             id=int(message_id),
@@ -617,8 +614,6 @@ class Channel:
         Yields:
             Each message from the requested page, bound to known channel and guild context.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -689,8 +684,6 @@ class Channel:
         Returns:
             A list of pinned Message objects.
         """
-        from .message import Message
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
 
@@ -723,8 +716,6 @@ class Channel:
         Returns:
             The result of this operation.
         """
-        from ..invite import Invite
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
         data = await self._http.get_channel_invites(self.id)
@@ -739,8 +730,6 @@ class Channel:
         Returns:
             The result of this operation.
         """
-        from ..invite import Invite
-
         if self._http is None:
             raise RuntimeError("Channel is not bound to an HTTP client")
         data = await self._http.create_channel_invite(self.id, **kwargs)

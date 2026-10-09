@@ -49,6 +49,30 @@ visibility loss removes its cached messages and voice indexes. Guild removal
 removes its dependent entries. An unavailable guild stays cached for recovery.
 A fresh READY and final shutdown clear state; Resume retains replayable state.
 
+## Members as authors
+
+In a guild, `message.author`, `ctx.author`, and the user passed to
+`on_reaction_add` are the author's `GuildMember` whenever one is known: from the
+event payload first, otherwise from the member cache. DMs, webhook messages, and
+cache misses give a `User`. A `GuildMember` works wherever a `User` does. Account
+attributes such as `username`, `bot`, and `avatar_url`, plus `send()`, delegate
+to `member.user`, and a member compares and hashes equal to the `User` with the
+same ID.
+
+Check the type before using member-only data, or use `ctx.fetch_author()`, which
+returns the cached member or fetches it over HTTP:
+
+```py
+@bot.command()
+async def roles(ctx):
+    author = await ctx.fetch_author()
+    if isinstance(author, fluxer.GuildMember):
+        await ctx.send(f"You have {len(author.roles)} roles")
+```
+
+Messages from the gateway share the live cached member. Messages returned by
+HTTP calls carry an independent copy of it, like every other HTTP snapshot.
+
 ## Guild collections and membership completeness
 
 `guild.members`, `roles`, `channels`, `emojis`, and `stickers` are read-only

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import re
 
+from .errors import ExpectedClosingQuoteError, InvalidEndOfQuotedStringError
+
 
 class StringView:
     """Cursor over command argument text with whitespace and quoted-word parsing.
@@ -110,8 +112,6 @@ class StringView:
         Returns:
             The requested quoted word.
         """
-        from .errors import ExpectedClosingQuoteError, InvalidEndOfQuotedStringError
-
         self.skip_ws()
         if self.eof:
             return ""

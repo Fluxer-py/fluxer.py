@@ -5,9 +5,12 @@ This module documents the existing implementation and its supported public surfa
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import IO, Any
 
+from ..asset import _download, _url_filename, _write
+from ..file import File
 from ..flags import AttachmentFlags
 
 
@@ -100,6 +103,81 @@ class Attachment:
             waveform=data.get("waveform", None),
             expires_at=data.get("expires_at", None),
             expired=data.get("expired", None),
+        )
+
+    def _download_url(self, use_cached: bool) -> str:
+        url = self.proxy_url if use_cached and self.proxy_url else self.url
+        if not url:
+            raise ValueError("The attachment has no URL to download")
+        return url
+
+    async def read(self, *, use_cached: bool = False) -> bytes:
+        """Download the attachment from the URL Fluxer issued for it.
+
+        Args:
+            use_cached: Download ``proxy_url`` (the Media Proxy copy) instead of ``url``.
+
+        Returns:
+            The attachment bytes.
+
+        Raises:
+            ValueError: The attachment has no URL.
+            aiohttp.ClientError: The download fails or returns an HTTP error.
+        """
+        return await _download(self._download_url(use_cached))
+
+    async def save(
+        self,
+        fp: str | os.PathLike[str] | IO[bytes],
+        *,
+        seek_begin: bool = True,
+        use_cached: bool = False,
+    ) -> int:
+        """Download the attachment into a file.
+
+        Args:
+            fp: Destination path (created or overwritten), or a binary file object.
+            seek_begin: For a file object, rewind it to the start after writing.
+            use_cached: Download ``proxy_url`` instead of ``url``.
+
+        Returns:
+            Number of bytes written.
+
+        Raises:
+            ValueError: The attachment has no URL.
+            aiohttp.ClientError: The download fails or returns an HTTP error.
+        """
+        return _write(await self.read(use_cached=use_cached), fp, seek_begin)
+
+    async def to_file(
+        self,
+        *,
+        filename: str | None = None,
+        spoiler: bool | None = None,
+        description: str | None = None,
+        use_cached: bool = False,
+    ) -> File:
+        """Download the attachment as a :class:`File` ready to send again.
+
+        Args:
+            filename: Attachment filename; defaults to this attachment's filename.
+            spoiler: Whether to mark it as a spoiler; defaults to this attachment's state.
+            description: Alternative text; defaults to this attachment's description.
+            use_cached: Download ``proxy_url`` instead of ``url``.
+
+        Returns:
+            A file holding the downloaded bytes.
+
+        Raises:
+            ValueError: The attachment has no URL.
+            aiohttp.ClientError: The download fails or returns an HTTP error.
+        """
+        data = await self.read(use_cached=use_cached)
+        return File(
+            data,
+            filename=filename or self.filename or _url_filename(self.url or ""),
+            spoiler=self.is_spoiler() if spoiler is None else spoiler,
+            description=self.description if description is None else description,
         )
 
     def to_dict(self) -> dict[str, Any]:

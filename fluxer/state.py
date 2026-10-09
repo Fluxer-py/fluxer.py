@@ -44,6 +44,15 @@ def _update(target: Any, source: Any, *, exclude: tuple[str, ...] = ()) -> Any:
     return target
 
 
+# Guild fields whose name differs from the payload key they are parsed from.
+_GUILD_PAYLOAD_KEYS = {
+    "icon_hash": "icon",
+    "banner_hash": "banner",
+    "splash_hash": "splash",
+    "embed_splash_hash": "embed_splash",
+}
+
+
 class _MemberView(Mapping[tuple[int, int], GuildMember]):
     """Compatibility lookup view without an additional member cache."""
 
@@ -348,7 +357,15 @@ class ConnectionState:
         message._state = self
         message._guild = None
         message._channel = None
-        message.author = self._intern_user(message.author)
+        if message._member_from_cache:
+            # Parsing attached a snapshot copy of the cached member; live
+            # messages share the cached member itself instead.
+            message.member = None
+            message._member_from_cache = False
+        author = message.author
+        account = self._intern_user(
+            author.user if isinstance(author, GuildMember) else author
+        )
         message.mentions = [self._intern_user(u) for u in message.mentions]
         message.users = [self._intern_user(u) for u in message.users]
         channel = self.channels.get(message.channel_id)
@@ -356,8 +373,12 @@ class ConnectionState:
             message._guild_id = channel.guild_id
         if message.member is not None:
             message.member.guild_id = message.guild_id
-            message.member.user = message.author
+            message.member.user = account
             message.member = self.store_member(message.member)
+            message.author = message.member
+        else:
+            message.author = account
+            message._resolve_author(live=True)
         if isinstance(message.referenced_message, Message):
             message.referenced_message._guild_id = message.guild_id
             self._hydrate_message(message.referenced_message)
@@ -536,7 +557,7 @@ class ConnectionState:
             self.guilds[guild.id] = guild
         collections = ("roles", "channels", "members", "emojis", "stickers")
         for name in _field_names(Guild):
-            if name in data and name not in collections:
+            if _GUILD_PAYLOAD_KEYS.get(name, name) in data and name not in collections:
                 setattr(guild, name, getattr(parsed, name))
         for name in ("roles", "emojis", "stickers"):
             if name in data:
@@ -572,7 +593,9 @@ class ConnectionState:
                 for voice in voices
                 if voice.get("user_id") is not None
             }
-            for identity, previous in tuple(self.voice_states.get(guild.id, {}).items()):
+            for identity, previous in tuple(
+                self.voice_states.get(guild.id, {}).items()
+            ):
                 if identity not in identities:
                     key = (guild.id, *identity)
                     self._remove_voice(key, previous)
@@ -617,11 +640,20 @@ class ConnectionState:
 
     def _parse_guild_create(self, data: dict[str, Any]) -> _Events:
         return [
-            ("on_guild_join", (self._guild_snapshot({"unavailable": False, **data}),))
+            (
+                "on_guild_join",
+                (
+                    self._guild_snapshot(
+                        {"unavailable": False, "unavailable_hidden": False, **data}
+                    ),
+                ),
+            )
         ]
 
     def _parse_guild_sync(self, data: dict[str, Any]) -> _Events:
-        self._guild_snapshot({"unavailable": False, **data})
+        self._guild_snapshot(
+            {"unavailable": False, "unavailable_hidden": False, **data}
+        )
         return self._fallback("GUILD_SYNC", data)
 
     def _parse_guild_update(self, data: dict[str, Any]) -> _Events:
@@ -971,15 +1003,15 @@ class ConnectionState:
         return [("on_voice_state_update", (self._store_voice_state(data),))]
 
     def _parse_message_reaction_add(self, data: dict[str, Any]) -> _Events:
-        raw = RawReactionActionEvent.from_data(data, "REACTION_ADD")
+        raw = RawReactionActionEvent.from_data(data, "REACTION_ADD", self.http)
         events: _Events = []
-        member_data = data.get("member")
-        user_data = member_data.get("user") if isinstance(member_data, dict) else None
-        user = self.users.get(raw.user_id)
-        if isinstance(user_data, dict) and str(user_data.get("id")) == str(raw.user_id):
-            user = self.store_user(user_data)
-            if raw.guild_id is not None and isinstance(member_data, dict):
-                self._member(member_data, raw.guild_id)
+        user: User | GuildMember | None = self.users.get(raw.user_id)
+        if raw.member is not None and raw.member.id == raw.user_id:
+            raw.member = self.store_member(raw.member)
+            user = raw.member
+        elif raw.guild_id is not None:
+            raw.member = self.get_member(raw.guild_id, raw.user_id)
+            user = raw.member or user
         message = self.get_message(raw.message_id)
         if message is not None:
             reaction = message._add_reaction(data, raw.emoji, raw.user_id)
@@ -998,7 +1030,9 @@ class ConnectionState:
         return events + self._fallback("MESSAGE_REACTION_ADD_MANY", data)
 
     def _parse_message_reaction_remove(self, data: dict[str, Any]) -> _Events:
-        raw = RawReactionActionEvent.from_data(data, "REACTION_REMOVE")
+        raw = RawReactionActionEvent.from_data(data, "REACTION_REMOVE", self.http)
+        if raw.member is not None and raw.member.id == raw.user_id:
+            raw.member = self.store_member(raw.member)
         message = self.get_message(raw.message_id)
         if message is not None:
             try:
@@ -1015,7 +1049,7 @@ class ConnectionState:
         return [("on_raw_reaction_clear", (raw,))]
 
     def _parse_message_reaction_remove_emoji(self, data: dict[str, Any]) -> _Events:
-        raw = RawReactionClearEmojiEvent.from_data(data)
+        raw = RawReactionClearEmojiEvent.from_data(data, self.http)
         message = self.get_message(raw.message_id)
         if message is not None:
             message._clear_emoji(raw.emoji)

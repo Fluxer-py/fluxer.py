@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from .._model_factory import _snapshot
 
-from .._endpoints import asset_url
+from ..asset import _GuildImages
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -15,56 +15,59 @@ from typing import TYPE_CHECKING, Any, cast
 from collections.abc import Sequence
 from .._collections import _EntitySequence
 
+from .channel import Channel
 from .emoji import Emoji
 from .member import GuildMember
 from .role import Role
+from ..audit_logs import AuditLog
+from ..invite import Invite
 from ..sticker import Sticker
 
 from ..utils import snowflake_to_datetime
 from ..fluxer_models import (
+    BulkEmojiResult,
+    BulkStickerResult,
+    DiscoveryApplication,
+    DiscoveryStatus,
+    GuildTransferResult,
     SearchAuthorType,
     SearchContentType,
     SearchEmbedType,
     SearchResponse,
     SearchSortBy,
     SearchSortOrder,
+    VanityUrl,
     parse_search_response,
 )
 
 if TYPE_CHECKING:
     from ..state import ConnectionState
-    from ..audit_logs import AuditLog
-    from ..fluxer_models import BulkEmojiResult
-    from ..fluxer_models import BulkStickerResult
-    from ..fluxer_models import DiscoveryApplication
-    from ..fluxer_models import DiscoveryStatus
-    from ..fluxer_models import GuildTransferResult
-    from ..fluxer_models import VanityUrl
-    from ..invite import Invite
     from ..http import HTTPClient
-    from .channel import Channel
+    from .voice import VoiceState
 
 
 @dataclass(slots=True)
-class Guild:
+class Guild(_GuildImages):
     """Represents a Fluxer guild (server/community).
 
     Attributes:
         id: The ID of the guild.
         name: The name of the guild (1-100 characters).
-        icon: Guild icon hash.
+        icon_hash: Guild icon hash.
         owner_id: The ID of the guild owner.
         member_count: Member count held by the main Gateway.
         unavailable: Unavailable used by this operation.
+        unavailable_hidden: Whether an unavailable guild is hidden from the client.
+        joined_at: When the current account joined the guild (ISO 8601), from Ready or Guild Create.
         roles: Guild roles.
         channels: Guild channels the caller can view.
         members: Members used by this operation.
         member_cache_complete: Whether a tracked full roster reconciles with the guild's member count.
         emojis: Guild emojis.
         stickers: Guild stickers.
-        banner: Guild banner hash.
-        splash: Invite splash hash.
-        embed_splash: Embedded invite splash hash.
+        banner_hash: Guild banner hash.
+        splash_hash: Invite splash hash.
+        embed_splash_hash: Embedded invite splash hash.
         vanity_url_code: Custom invite code.
         message_history_cutoff: Earliest message visible to a member without `READ_MESSAGE_HISTORY`.
         content_warning_text: Guild content warning text (max 200 characters).
@@ -94,15 +97,24 @@ class Guild:
         nsfw: Whether the guild is marked as adult content.
         features: Guild features.
         created_at: Return the UTC creation time encoded in this object's snowflake.
-        icon_url: Build the guild icon URL from the discovered media service.
+        icon_url: URL of the guild icon, or None.
+        icon: The guild icon asset, or None.
+        banner: The guild banner asset, or None.
+        splash: The invite splash asset, or None.
+        embed_splash: The embedded invite splash asset, or None.
+        banner_url: URL of the guild banner, or None.
+        splash_url: URL of the invite splash, or None.
+        embed_splash_url: URL of the embedded invite splash, or None.
     """
 
     id: int
     name: str | None = None
-    icon: str | None = None
+    icon_hash: str | None = None
     owner_id: int | None = None
     member_count: int | None = None
     unavailable: bool = False
+    unavailable_hidden: bool = False
+    joined_at: str | None = None
     roles: Sequence[Role] = field(default_factory=list)
     channels: Sequence[Channel] = field(default_factory=list)
     members: Sequence[GuildMember] = field(default_factory=list)
@@ -110,9 +122,9 @@ class Guild:
     stickers: Sequence[Sticker] = field(default_factory=list)
     _member_cache_complete: bool = field(default=False, repr=False)
 
-    banner: str | None = None
-    splash: str | None = None
-    embed_splash: str | None = None
+    banner_hash: str | None = None
+    splash_hash: str | None = None
+    embed_splash_hash: str | None = None
     vanity_url_code: str | None = None
     message_history_cutoff: str | None = None
     content_warning_text: str | None = None
@@ -182,6 +194,17 @@ class Guild:
         """
         return self._member_cache_complete
 
+    @property
+    def voice_states(self) -> list[VoiceState]:
+        """Voice states in this guild's channels that the session can view.
+
+        Returns:
+            The cached voice states, or an empty list when the guild is not live state.
+        """
+        if self._state is None:
+            return []
+        return list(self._state.voice_states.get(self.id, {}).values())
+
     def get_member(self, user_id: int) -> GuildMember | None:
         """Look up a retained member without making an HTTP request.
 
@@ -226,17 +249,17 @@ class Guild:
         Returns:
             A parsed Guild instance.
         """
-        from .channel import Channel
-
         data = {**data.get("properties", {}), **data}
         guild_id = int(data["id"])
         guild = cls(
             id=int(data["id"]),
             name=data.get("name"),
-            icon=data.get("icon"),
+            icon_hash=data.get("icon"),
             owner_id=int(data["owner_id"]) if data.get("owner_id") else None,
             member_count=data.get("member_count"),
             unavailable=data.get("unavailable", False),
+            unavailable_hidden=data.get("unavailable_hidden", False),
+            joined_at=data.get("joined_at"),
             roles=[
                 Role.from_data(role, http, guild_id) for role in data.get("roles", [])
             ],
@@ -256,9 +279,9 @@ class Guild:
                 Sticker.from_data(sticker, http, guild_id=guild_id)
                 for sticker in data.get("stickers", [])
             ],
-            banner=data.get("banner", None),
-            splash=data.get("splash", None),
-            embed_splash=data.get("embed_splash", None),
+            banner_hash=data.get("banner", None),
+            splash_hash=data.get("splash", None),
+            embed_splash_hash=data.get("embed_splash", None),
             vanity_url_code=data.get("vanity_url_code", None),
             message_history_cutoff=data.get("message_history_cutoff", None),
             content_warning_text=data.get("content_warning_text", None),
@@ -312,18 +335,6 @@ class Guild:
         """
         return snowflake_to_datetime(self.id)
 
-    @property
-    def icon_url(self) -> str | None:
-        """Build the guild icon URL from the discovered media service.
-
-        Returns:
-            The result of this operation.
-        """
-        if self.icon:
-            ext = "gif" if self.icon.startswith("a_") else "png"
-            return asset_url(self._http, "media", f"icons/{self.id}/{self.icon}.{ext}")
-        return None
-
     async def fetch_emojis(self) -> list[Emoji]:
         """Fetch all emojis in this guild.
 
@@ -332,8 +343,6 @@ class Guild:
         """
         if not self._http:
             raise RuntimeError("Cannot fetch emojis without HTTPClient")
-
-        from .emoji import Emoji
 
         data = await self._http.get_guild_emojis(self.id)
         # Pass guild_id when creating emojis since API doesn't always return it
@@ -351,8 +360,6 @@ class Guild:
         """
         if not self._http:
             raise RuntimeError("Cannot fetch roles without HTTPClient")
-
-        from .role import Role
 
         data = await self._http.get_guild_roles(self.id)
         return [
@@ -384,8 +391,6 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot create role without HTTPClient")
 
-        from .role import Role
-
         data = await self._http.create_guild_role(
             self.id,
             name=name,
@@ -409,8 +414,6 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot fetch member without HTTPClient")
 
-        from .member import GuildMember
-
         data = await self._http.get_guild_member(self.id, user_id)
         return _snapshot(GuildMember.from_data, data, self._http, guild_id=self.id)
 
@@ -428,8 +431,6 @@ class Guild:
         """
         if not self._http:
             raise RuntimeError("Cannot fetch members without HTTPClient")
-
-        from .member import GuildMember
 
         data = await self._http.get_guild_members(self.id, limit=limit, after=after)
         return [
@@ -507,8 +508,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..invite import Invite
-
         if not self._http:
             raise RuntimeError("Cannot fetch invites without HTTPClient")
         data = await self._http.get_guild_invites(self.id)
@@ -523,12 +522,10 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..audit_logs import AuditLog
-
         if not self._http:
             raise RuntimeError("Cannot fetch audit logs without HTTPClient")
         data = await self._http.get_guild_audit_logs(self.id, **kwargs)
-        return AuditLog.from_data(data)
+        return _snapshot(AuditLog.from_data, data, self._http)
 
     async def fetch_stickers(self) -> list[Sticker]:
         """Fetch all stickers in this guild.
@@ -539,7 +536,10 @@ class Guild:
         if not self._http:
             raise RuntimeError("Cannot fetch stickers without HTTPClient")
         data = await self._http.get_guild_stickers(self.id)
-        return [_snapshot(Sticker.from_data, item, self._http, guild_id=self.id) for item in data]
+        return [
+            _snapshot(Sticker.from_data, item, self._http, guild_id=self.id)
+            for item in data
+        ]
 
     async def discovery_status(self) -> DiscoveryStatus:
         """Discovery status.
@@ -547,8 +547,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import DiscoveryStatus
-
         if not self._http:
             raise RuntimeError("Cannot fetch discovery status without HTTPClient")
         return DiscoveryStatus.from_data(
@@ -564,8 +562,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import DiscoveryApplication
-
         if not self._http:
             raise RuntimeError("Cannot apply for discovery without HTTPClient")
         method = getattr(self._http, "apply_for_guild_discovery", None)
@@ -584,8 +580,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import DiscoveryApplication
-
         if not self._http:
             raise RuntimeError("Cannot edit discovery application without HTTPClient")
         method = getattr(self._http, "edit_guild_discovery_application", None)
@@ -624,8 +618,6 @@ class Guild:
         Returns:
             The requested vanity url.
         """
-        from ..fluxer_models import VanityUrl
-
         if not self._http:
             raise RuntimeError("Cannot fetch vanity URL without HTTPClient")
         return VanityUrl.from_data(
@@ -641,8 +633,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import VanityUrl
-
         if not self._http:
             raise RuntimeError("Cannot update vanity URL without HTTPClient")
         return VanityUrl.from_data(
@@ -661,8 +651,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import GuildTransferResult
-
         if not self._http:
             raise RuntimeError("Cannot transfer ownership without HTTPClient")
         return GuildTransferResult.from_data(
@@ -679,8 +667,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import BulkEmojiResult
-
         if not self._http:
             raise RuntimeError("Cannot create emojis without HTTPClient")
         return BulkEmojiResult.from_data(
@@ -698,8 +684,6 @@ class Guild:
         Returns:
             The result of this operation.
         """
-        from ..fluxer_models import BulkStickerResult
-
         if not self._http:
             raise RuntimeError("Cannot create stickers without HTTPClient")
         return BulkStickerResult.from_data(

@@ -13,9 +13,7 @@ for path in (str(PACKAGE_ROOT), str(WORKSPACE_ROOT)):
 
 
 def load_dev_token() -> str:
-    env_paths = (
-        WORKSPACE_ROOT / "test_implementation" / ".env",
-    )
+    env_paths = (WORKSPACE_ROOT / "test_implementation" / ".env",)
     for env_path in env_paths:
         if not env_path.exists():
             continue

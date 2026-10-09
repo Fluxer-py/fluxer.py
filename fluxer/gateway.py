@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 import warnings
 from collections import deque
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -151,6 +152,8 @@ class Gateway:
         self._voice_state_queue: asyncio.Queue[GatewayPayload] = asyncio.Queue()
         self._is_closed: bool = False
         self._last_heartbeat_ack: bool = True
+        self._last_heartbeat_sent: float | None = None
+        self._latency: float = float("inf")
 
         self._tasks: list[asyncio.Task[None]] = []
         self._dispatch_queue: asyncio.Queue[GatewayPayload] = asyncio.Queue(
@@ -169,6 +172,16 @@ class Gateway:
             Whether the documented condition holds for the current state.
         """
         return self._ws is not None and not self._ws.closed
+
+    @property
+    def latency(self) -> float:
+        """Seconds between the most recent heartbeat and its acknowledgement.
+
+        Returns:
+            The latest heartbeat round-trip time, or ``float("inf")`` before the
+            first acknowledgement on the current connection.
+        """
+        return self._latency
 
     @staticmethod
     def _gateway_url(url: str) -> str:
@@ -310,6 +323,13 @@ class Gateway:
 
             case GatewayOpcode.HEARTBEAT_ACK:
                 self._last_heartbeat_ack = True
+                if self._last_heartbeat_sent is not None:
+                    self._latency = time.perf_counter() - self._last_heartbeat_sent
+                    if self._latency > 10:
+                        log.warning(
+                            "High gateway latency, heartbeat is %.1fs behind",
+                            self._latency,
+                        )
                 log.debug("Heartbeat ACK received")
 
             case GatewayOpcode.HEARTBEAT:
@@ -446,6 +466,7 @@ class Gateway:
         """Send a heartbeat to keep the connection alive."""
         payload = GatewayPayload(op=GatewayOpcode.HEARTBEAT, d=self._sequence)
         await self._send(payload)
+        self._last_heartbeat_sent = time.perf_counter()
 
     # =========================================================================
     # Heartbeat loop
@@ -454,6 +475,8 @@ class Gateway:
     async def _start_heartbeat(self) -> None:
         await self._stop_heartbeat()
         self._last_heartbeat_ack = True
+        self._last_heartbeat_sent = None
+        self._latency = float("inf")
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def _stop_heartbeat(self) -> None:
@@ -463,11 +486,12 @@ class Gateway:
             await asyncio.gather(task, return_exceptions=True)
 
     async def _heartbeat_loop(self) -> None:
-        """Periodically send heartbeats. If we miss an ACK, reconnect."""
-        try:
-            import random
+        """Periodically send heartbeats. If we miss an ACK, reconnect.
 
-            await asyncio.sleep(self._heartbeat_interval * random.random())
+        The first heartbeat goes out immediately (Fluxer accepts heartbeats before
+        authentication), so ``latency`` is measured within one round trip of Hello.
+        """
+        try:
             while True:
                 # Check if the connection is still active
                 if not self.is_connected:

@@ -20,6 +20,7 @@ from fluxer.models.user import User
 
 
 async def main():
+    """Fetch a user and print their username and display name."""
     token = "bot_token"
 
     # Optional: Specify a user ID to fetch (otherwise fetches bot user)

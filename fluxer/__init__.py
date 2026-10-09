@@ -3,7 +3,7 @@
 This module documents the existing implementation and its supported public surface.
 """
 
-__version__ = "0.5.0-alpha.4"
+__version__ = "0.5.0-alpha.5"
 __title__ = "fluxer.py"
 __author__ = "Emil"
 __license__ = "MIT"
@@ -13,6 +13,7 @@ from .client import Client
 from .ext.commands import Bot, when_mentioned_or, when_mentioned
 from .cog import Cog
 from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
+from .asset import Asset
 from .file import File
 from .flags import AttachmentFlags, MessageFlags
 from .fluxer_models import (
@@ -59,7 +60,14 @@ from .errors import (
 # Models
 from .models import (
     Channel,
+    ChannelMention,
     Embed,
+    EmbedAuthor,
+    EmbedField,
+    EmbedFooter,
+    EmbedMedia,
+    EmbedProvider,
+    MessageCall,
     Emoji,
     Guild,
     GuildMember,
@@ -106,6 +114,7 @@ __all__ = [
     "when_mentioned",
     "when_mentioned_or",
     "Cog",
+    "Asset",
     "File",
     "HTTPClient",
     # Enums
@@ -137,7 +146,14 @@ __all__ = [
     # Models
     "Channel",
     "ChannelPermissionOverwrite",
+    "ChannelMention",
     "Embed",
+    "EmbedAuthor",
+    "EmbedField",
+    "EmbedFooter",
+    "EmbedMedia",
+    "EmbedProvider",
+    "MessageCall",
     "Emoji",
     "Guild",
     "GuildMember",

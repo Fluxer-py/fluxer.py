@@ -61,11 +61,14 @@ async def test_reaction_add_uses_cached_message_and_resolves_user(source: str) -
     assert reaction.count == 1
     assert reaction.message is message
     assert user.id == 42
-    assert user.username == {
-        "member": "from_member",
-        "cache": "from_cache",
-        "id_only": "",
-    }[source]
+    assert (
+        user.username
+        == {
+            "member": "from_member",
+            "cache": "from_cache",
+            "id_only": "",
+        }[source]
+    )
     assert raw[0].message_id == 10
     assert payloads[0] is data
     assert data["user_id"] == "42"
@@ -136,7 +139,9 @@ async def test_data_callbacks_cover_modeled_unhandled_and_early_return_events() 
     await client._dispatch("MESSAGE_CREATE", message_data)
     assert await waiter is message_data
     assert ("message_data", message_data) in seen
-    assert any(name == "modeled" and isinstance(item, fluxer.Message) for name, item in seen)
+    assert any(
+        name == "modeled" and isinstance(item, fluxer.Message) for name, item in seen
+    )
 
     voice_data = {"guild_id": None, "endpoint": "ignored"}
     await client._dispatch("VOICE_SERVER_UPDATE", voice_data)

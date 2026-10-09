@@ -20,7 +20,9 @@ from ...models import (
     Role,
     User,
 )
+from ... import utils
 from ...colour import Color, Colour
+from ...invite import Invite
 from .errors import (
     BadArgument,
     BadBoolArgument,
@@ -313,13 +315,16 @@ class PartialEmojiConverter(Converter):
         Returns:
             The result of this operation.
         """
-        from ...models.reaction import PartialEmoji
-
         if argument.startswith("<") and argument.endswith(">") and ":" in argument:
             animated = argument.startswith("<a:")
             parts = argument.strip("<>").split(":")
             if len(parts) == 3:
-                return PartialEmoji(name=parts[1], id=int(parts[2]), animated=animated)
+                return PartialEmoji(
+                    name=parts[1],
+                    id=int(parts[2]),
+                    animated=animated,
+                    _http=ctx.bot._http,
+                )
         return PartialEmoji(name=argument, id=None, animated=False)
 
 
@@ -360,8 +365,6 @@ class InviteConverter(Converter):
         Returns:
             The result of this operation.
         """
-        from ...invite import Invite
-
         if ctx.bot._http is None:
             raise BadArgument("Bot is not bound to an HTTP client")
         data = await ctx.bot._http.get_invite(argument)
@@ -398,8 +401,6 @@ class clean_content(Converter):
         Returns:
             The result of this operation.
         """
-        from ... import utils
-
         if self.remove_markdown:
             argument = utils.remove_markdown(argument)
         if self.escape_markdown:

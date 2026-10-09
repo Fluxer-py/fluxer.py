@@ -1,5 +1,6 @@
 """Command name registration and case lookup regressions."""
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -235,6 +236,84 @@ async def test_extension_collision_reports_registration_error_as_cause() -> None
     assert "shared" in str(caught.value.__cause__)
     assert bot.get_command("shared") is original
     assert bot.extensions == {}
+
+
+EXTENSION_SOURCE = """
+from fluxer.ext import commands
+
+
+class Info(commands.Cog):
+    @commands.command(name="info")
+    async def info(self, ctx):
+        pass
+
+    @commands.Cog.listener("on_ready")
+    async def ready(self):
+        pass
+
+
+async def ping(ctx):
+    pass
+
+
+async def on_message(message):
+    pass
+
+
+async def setup(bot):
+    await bot.add_cog(Info(bot))
+    bot.add_command(commands.command(name="ping")(ping))
+    bot.add_listener(on_message)
+"""
+
+
+@pytest.mark.asyncio
+async def test_reload_extension_replaces_cogs_commands_and_listeners(
+    tmp_path, monkeypatch
+) -> None:
+    package = tmp_path / "reload_cogs"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "info.py").write_text(EXTENSION_SOURCE)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    bot = commands.Bot(command_prefix="!", help_command=None)
+
+    await bot.load_extension("reload_cogs.info")
+    first_cog = bot.get_cog("Info")
+    await bot.reload_extension("reload_cogs.info")
+
+    assert bot.get_cog("Info") is not first_cog
+    assert list(bot.extensions) == ["reload_cogs.info"]
+    assert bot.get_command("ping") is not None
+    assert len(bot._event_handlers["on_message"]) == 1
+    assert len(bot._event_handlers["on_ready"]) == 1
+
+    await bot.unload_extension("reload_cogs.info")
+    assert bot.get_cog("Info") is None
+    assert bot.get_command("info") is None
+    assert bot.get_command("ping") is None
+    assert bot._event_handlers["on_message"] == []
+    assert bot._event_handlers["on_ready"] == []
+    assert "reload_cogs.info" not in sys.modules
+
+
+@pytest.mark.asyncio
+async def test_failed_extension_setup_rolls_back_partial_registration(
+    tmp_path, monkeypatch
+) -> None:
+    (tmp_path / "broken_ext.py").write_text(
+        EXTENSION_SOURCE + "\n    raise RuntimeError('boom')\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    bot = commands.Bot(command_prefix="!", help_command=None)
+
+    with pytest.raises(commands.ExtensionFailed):
+        await bot.load_extension("broken_ext")
+    assert bot.get_cog("Info") is None
+    assert bot.get_command("info") is None
+    assert bot.get_command("ping") is None
+    assert bot._event_handlers.get("on_message", []) == []
+    assert "broken_ext" not in sys.modules
 
 
 @pytest.mark.asyncio

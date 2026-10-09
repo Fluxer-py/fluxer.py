@@ -10,9 +10,148 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from ._endpoints import asset_url
+from .asset import _GuildImages
+from .models.user import User
 
 if TYPE_CHECKING:
     from .http import HTTPClient
+
+
+@dataclass(slots=True)
+class PartialGuild(_GuildImages):
+    """The public summary of a guild, as embedded in an invite.
+
+    Attributes:
+        id: Guild ID.
+        name: Guild name.
+        icon_hash: Icon image hash, or None.
+        banner_hash: Banner image hash, or None.
+        banner_width: Banner width in pixels, or None.
+        banner_height: Banner height in pixels, or None.
+        splash_hash: Invite splash image hash, or None.
+        splash_width: Splash width in pixels, or None.
+        splash_height: Splash height in pixels, or None.
+        splash_card_alignment: Alignment of the invite splash card.
+        embed_splash_hash: Embed splash image hash, or None.
+        embed_splash_width: Embed splash width in pixels, or None.
+        embed_splash_height: Embed splash height in pixels, or None.
+        features: Enabled guild features.
+        icon_url: URL of the guild icon, or None.
+        icon: The guild icon asset, or None.
+        banner: The guild banner asset, or None.
+        splash: The invite splash asset, or None.
+        embed_splash: The embedded invite splash asset, or None.
+        banner_url: URL of the guild banner, or None.
+        splash_url: URL of the invite splash, or None.
+        embed_splash_url: URL of the embedded invite splash, or None.
+    """
+
+    id: int
+    name: str = ""
+    icon_hash: str | None = None
+    banner_hash: str | None = None
+    banner_width: int | None = None
+    banner_height: int | None = None
+    splash_hash: str | None = None
+    splash_width: int | None = None
+    splash_height: int | None = None
+    splash_card_alignment: int = 0
+    embed_splash_hash: str | None = None
+    embed_splash_width: int | None = None
+    embed_splash_height: int | None = None
+    features: list[str] = field(default_factory=list)
+    _http: HTTPClient | None = field(default=None, repr=False)
+
+    @classmethod
+    def from_data(
+        cls, data: dict[str, Any], http: HTTPClient | None = None
+    ) -> PartialGuild:
+        """Build a PartialGuild from its decoded payload.
+
+        Args:
+            data: Partial guild object.
+            http: Transport used to build asset URLs.
+
+        Returns:
+            The parsed guild summary.
+        """
+        return cls(
+            id=int(data["id"]),
+            name=data.get("name") or "",
+            icon_hash=data.get("icon"),
+            banner_hash=data.get("banner"),
+            banner_width=data.get("banner_width"),
+            banner_height=data.get("banner_height"),
+            splash_hash=data.get("splash"),
+            splash_width=data.get("splash_width"),
+            splash_height=data.get("splash_height"),
+            splash_card_alignment=data.get("splash_card_alignment", 0),
+            embed_splash_hash=data.get("embed_splash"),
+            embed_splash_width=data.get("embed_splash_width"),
+            embed_splash_height=data.get("embed_splash_height"),
+            features=list(data.get("features", [])),
+            _http=http,
+        )
+
+
+@dataclass(slots=True)
+class PartialInviteRecipient:
+    """A group DM recipient listed on an invite.
+
+    Attributes:
+        username: The recipient's username.
+    """
+
+    username: str
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> PartialInviteRecipient:
+        """Build a PartialInviteRecipient from its decoded payload.
+
+        Args:
+            data: Partial invite recipient object.
+
+        Returns:
+            The parsed recipient.
+        """
+        return cls(username=data.get("username", ""))
+
+
+@dataclass(slots=True)
+class PartialInviteChannel:
+    """The channel an invite targets.
+
+    Attributes:
+        id: Channel ID.
+        name: Channel name, or None (group DMs may have none).
+        type: Channel type.
+        recipients: Group DM recipients, when the invite targets a group DM.
+    """
+
+    id: int
+    name: str | None = None
+    type: int = 0
+    recipients: list[PartialInviteRecipient] = field(default_factory=list)
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> PartialInviteChannel:
+        """Build a PartialInviteChannel from its decoded payload.
+
+        Args:
+            data: Partial invite channel object.
+
+        Returns:
+            The parsed channel summary.
+        """
+        return cls(
+            id=int(data["id"]),
+            name=data.get("name"),
+            type=data.get("type", 0),
+            recipients=[
+                PartialInviteRecipient.from_data(item)
+                for item in data.get("recipients", [])
+            ],
+        )
 
 
 @dataclass(slots=True)
@@ -54,9 +193,9 @@ class Invite:
     uses: int | None = None
     max_uses: int | None = None
     max_age: int | None = None
-    guild: dict[str, Any] | None = None
-    channel: dict[str, Any] | None = None
-    inviter: dict[str, Any] | None = None
+    guild: PartialGuild | None = None
+    channel: PartialInviteChannel | None = None
+    inviter: User | None = None
 
     _http: HTTPClient | None = field(default=None, repr=False)
 
@@ -97,9 +236,15 @@ class Invite:
             uses=data.get("uses"),
             max_uses=data.get("max_uses"),
             max_age=data.get("max_age"),
-            guild=data.get("guild"),
-            channel=data.get("channel"),
-            inviter=data.get("inviter"),
+            guild=PartialGuild.from_data(guild, http)
+            if isinstance(guild, dict)
+            else None,
+            channel=PartialInviteChannel.from_data(channel)
+            if isinstance(channel, dict)
+            else None,
+            inviter=User.from_data(inviter, http)
+            if isinstance(inviter, dict)
+            else None,
             _http=http,
         )
 
@@ -131,4 +276,4 @@ class Invite:
         return self.url
 
 
-__all__ = ("Invite",)
+__all__ = ("Invite", "PartialGuild", "PartialInviteChannel", "PartialInviteRecipient")

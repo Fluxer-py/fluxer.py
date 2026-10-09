@@ -9,6 +9,7 @@ import asyncio
 
 import importlib
 import inspect
+import logging
 import sys
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any, TypeGuard, cast
@@ -399,15 +400,15 @@ class Bot(GroupMixin, Client):
         Returns:
             None.
         """
-        import logging
-
         logging.getLogger(__name__).exception(
             "Ignoring exception in command %s", context.command, exc_info=exception
         )
 
     def _on_gateway_message(self, message: Message) -> None:
         """Run commands independently of ordered Gateway cache updates."""
-        task = asyncio.create_task(self._run_event_handler("command", self.process_commands, message))
+        task = asyncio.create_task(
+            self._run_event_handler("command", self.process_commands, message)
+        )
         self._handler_tasks.add(task)
         task.add_done_callback(self._handler_tasks.discard)
 
@@ -503,11 +504,14 @@ class Bot(GroupMixin, Client):
             if inspect.isawaitable(result):
                 await result
         except Exception as exc:
+            # Roll back anything setup registered before failing.
+            await self._remove_module_references(name)
+            self._purge_modules(name)
             raise ExtensionFailed(name, exc) from exc
         self._extensions[name] = module
 
     async def unload_extension(self, name: str) -> None:
-        """Unload extension.
+        """Unload an extension along with the cogs, commands, and listeners it added.
 
         Args:
             name: Name to assign or resolve in this operation.
@@ -518,12 +522,43 @@ class Bot(GroupMixin, Client):
         if name not in self._extensions:
             raise ExtensionNotLoaded(name=name)
         module = self._extensions.pop(name)
-        teardown = getattr(module, "teardown", None)
-        if teardown:
-            result = teardown(self)
-            if inspect.isawaitable(result):
-                await result
-        sys.modules.pop(name, None)
+        try:
+            await self._remove_module_references(name)
+            teardown = getattr(module, "teardown", None)
+            if teardown:
+                result = teardown(self)
+                if inspect.isawaitable(result):
+                    await result
+        finally:
+            self._purge_modules(name)
+
+    @staticmethod
+    def _is_submodule(parent: str, child: str | None) -> bool:
+        """Return whether ``child`` is ``parent`` or a module nested under it."""
+        return child is not None and (child == parent or child.startswith(f"{parent}."))
+
+    async def _remove_module_references(self, name: str) -> None:
+        """Remove cogs, commands, and listeners defined in an extension module."""
+        for cog_name, cog in list(self._cogs.items()):
+            if self._is_submodule(name, type(cog).__module__):
+                await self.remove_cog(cog_name)
+        for command in self.commands:
+            module = getattr(command.callback, "__module__", None)
+            if self._is_submodule(name, module):
+                self.remove_command(command.name)
+        for handlers in self._event_handlers.values():
+            handlers[:] = [
+                handler
+                for handler in handlers
+                if not self._is_submodule(name, getattr(handler, "__module__", None))
+            ]
+
+    @staticmethod
+    def _purge_modules(name: str) -> None:
+        """Drop an extension and its submodules from the import cache."""
+        for module_name in list(sys.modules):
+            if Bot._is_submodule(name, module_name):
+                del sys.modules[module_name]
 
     async def reload_extension(self, name: str, *, package: str | None = None) -> None:
         """Reload extension.

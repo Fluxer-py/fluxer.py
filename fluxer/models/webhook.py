@@ -15,8 +15,16 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, unquote
 
 from .user import User
-from .message import Message, MessageReference, MessageSnapshot, DeletedReferencedMessage
+from .message import (
+    ChannelMention,
+    Message,
+    MessageCall,
+    MessageReference,
+    MessageSnapshot,
+    DeletedReferencedMessage,
+)
 from .attachment import Attachment
+from .embed import Embed
 from .reaction import Reaction
 from ..sticker import Sticker
 
@@ -67,7 +75,7 @@ class WebhookMessage:
     timestamp: str
     edited_timestamp: str | None = None
 
-    embeds: list[dict[str, Any]] = field(default_factory=list)
+    embeds: list[Embed] = field(default_factory=list)
     attachments: list[Attachment] = field(default_factory=list)
     mentions: list[User] = field(default_factory=list)
     pinned: bool = False
@@ -77,9 +85,9 @@ class WebhookMessage:
     tts: bool = False
     mention_everyone: bool = False
     nonce: str | None = None
-    call: dict[str, Any] | None = None
+    call: MessageCall | None = None
     mention_roles: list[int] = field(default_factory=list)
-    mention_channels: list[dict[str, Any]] = field(default_factory=list)
+    mention_channels: list[ChannelMention] = field(default_factory=list)
     nsfw_emojis: list[int] = field(default_factory=list)
     users: list[User] = field(default_factory=list)
     stickers: list[Sticker] = field(default_factory=list)
@@ -137,7 +145,7 @@ class WebhookMessage:
             author=User.from_data(data["author"], http),
             timestamp=data["timestamp"],
             edited_timestamp=data.get("edited_timestamp"),
-            embeds=data.get("embeds", []),
+            embeds=parsed.embeds,
             attachments=[Attachment.from_data(a) for a in data.get("attachments", [])],
             mentions=[User.from_data(u, http) for u in data.get("mentions", [])],
             pinned=data.get("pinned", False),
@@ -188,7 +196,8 @@ class WebhookMessage:
             self.id,
             **payload,
         )
-        return _snapshot(WebhookMessage.from_data,
+        return _snapshot(
+            WebhookMessage.from_data,
             data,
             self._http,
             webhook_id=self.webhook_id,
@@ -220,7 +229,7 @@ class Webhook:
         channel_id: Channel identity retained from the payload or operation context.
         user: User object or identity used by the operation.
         name: Name to assign or resolve in this operation.
-        avatar: Replacement avatar; on an edit, omission preserves it and None clears it.
+        avatar_hash: The avatar hash the webhook posts under, or None.
         token: Caller-supplied credential or webhook capability; keep this value secret.
     """
 
@@ -229,7 +238,7 @@ class Webhook:
     channel_id: int
     user: User | None
     name: str
-    avatar: str | None
+    avatar_hash: str | None
     token: str = field(repr=False)
     _token_only: bool = field(default=False, repr=False)
     _url_base: str | None = field(default=None, repr=False)
@@ -273,7 +282,7 @@ class Webhook:
             channel_id=0,
             user=None,
             name="Webhook",
-            avatar=None,
+            avatar_hash=None,
             token=token,
             _token_only=True,
             _url_base=f"{parsed.scheme}://{parsed.netloc}/" + "/".join(path[:index]),
@@ -308,7 +317,7 @@ class Webhook:
             if data.get("user") is not None
             else None,
             name=data["name"],
-            avatar=data.get("avatar", None),
+            avatar_hash=data.get("avatar", None),
             token=data.get("token", ""),
             _token_only="user" not in data,
             _http=http,
@@ -359,7 +368,8 @@ class Webhook:
     async def _validate_authority(self) -> None:
         if self._url_base is None or self._http is None:
             return
-        from ..http import HTTPClient
+        # Circular import: fluxer.http imports fluxer.models, which imports this module.
+        from ..http import HTTPClient  # noqa: PLC0415
 
         if isinstance(self._http, HTTPClient):
             await self._http._ensure_session()
@@ -435,7 +445,8 @@ class Webhook:
             tts=tts,
         )
         if data is not None:
-            return _snapshot(WebhookMessage.from_data,
+            return _snapshot(
+                WebhookMessage.from_data,
                 data,
                 self._http,
                 webhook_id=self.id,
@@ -483,7 +494,8 @@ class Webhook:
             message_id,
             **payload,
         )
-        return _snapshot(WebhookMessage.from_data,
+        return _snapshot(
+            WebhookMessage.from_data,
             data,
             self._http,
             webhook_id=self.id,

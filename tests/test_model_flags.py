@@ -30,9 +30,10 @@ def message_payload(**extra: Any) -> dict[str, Any]:
 def test_message_flag_bits(bit: int, attribute: str) -> None:
     flags = fluxer.MessageFlags(bit)
     assert getattr(flags, attribute) is True
-    assert sum(
-        (flags.suppress_embeds, flags.suppress_notifications, flags.voice_message)
-    ) == 1
+    assert (
+        sum((flags.suppress_embeds, flags.suppress_notifications, flags.voice_message))
+        == 1
+    )
     assert int(flags) == flags.value == bit
 
 
@@ -47,9 +48,9 @@ def test_message_flag_bits(bit: int, attribute: str) -> None:
 def test_attachment_flag_bits(bit: int, attribute: str) -> None:
     flags = fluxer.AttachmentFlags(bit)
     assert getattr(flags, attribute) is True
-    assert sum(
-        (flags.is_spoiler, flags.contains_explicit_media, flags.is_animated)
-    ) == 1
+    assert (
+        sum((flags.is_spoiler, flags.contains_explicit_media, flags.is_animated)) == 1
+    )
     assert int(flags) == flags.value == bit
 
 
@@ -99,8 +100,11 @@ def test_message_models_parse_and_accept_integer_masks(model: Any) -> None:
 def test_attachment_spoiler_uses_flag_and_serializes_integer_mask() -> None:
     attachment = Attachment.from_data(
         {
-            "id": "50", "filename": "ordinary.txt", "size": 3,
-            "url": "https://media.example.test/file", "flags": (1 << 3) | (1 << 4),
+            "id": "50",
+            "filename": "ordinary.txt",
+            "size": 3,
+            "url": "https://media.example.test/file",
+            "flags": (1 << 3) | (1 << 4),
         }
     )
     assert isinstance(attachment.flags, fluxer.AttachmentFlags)
@@ -111,8 +115,11 @@ def test_attachment_spoiler_uses_flag_and_serializes_integer_mask() -> None:
     assert isinstance(attachment.to_dict()["flags"], int)
 
     direct = Attachment(
-        id=51, filename="SPOILER_file.txt", size=3,
-        url="https://media.example.test/file", flags=cast(Any, 0),
+        id=51,
+        filename="SPOILER_file.txt",
+        size=3,
+        url="https://media.example.test/file",
+        flags=cast(Any, 0),
     )
     assert isinstance(direct.flags, fluxer.AttachmentFlags)
     assert not direct.is_spoiler()

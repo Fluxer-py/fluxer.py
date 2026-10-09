@@ -1,4 +1,7 @@
+"""Example cog with a message listener and a permission-checked command."""
+
 from bot import MyBot
+
 import fluxer
 from fluxer import Cog
 from fluxer.checks import has_permission
@@ -9,8 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 class CogExample(Cog):
+    """Cog showing a listener and a moderation command."""
+
     # Change the bot parameter type to MyBot for better type hinting
     def __init__(self, bot: MyBot):
+        """Create the cog for ``bot``."""
         super().__init__(bot)
 
     # Example Listener
@@ -19,6 +25,7 @@ class CogExample(Cog):
     )
     # Cog events need the self arg!
     async def on_message_example(self, message: fluxer.Message):
+        """Log every message sent by a non-bot user."""
         if message.author.bot:
             return
         guild_name: str | None = None
@@ -34,6 +41,7 @@ class CogExample(Cog):
     @has_permission(fluxer.Permissions.KICK_MEMBERS)
     # Cog commands need the self arg!
     async def kick(self, ctx: Context, user_id: int):
+        """Kick a member from this community by user ID."""
         logger.info(f"Received kick command from {ctx.author.display_name}")
 
         if ctx.message.guild_id is None:
@@ -54,4 +62,5 @@ class CogExample(Cog):
 
 # Method called to actually register the Cog class
 async def setup(bot: MyBot):
+    """Register the cog when the extension is loaded."""
     await bot.add_cog(CogExample(bot))

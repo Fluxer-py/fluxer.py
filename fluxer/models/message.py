@@ -11,7 +11,14 @@ from .._endpoints import asset_url
 
 from .._types import UNSET, UnsetType
 from ..flags import MessageFlags
+from ..sticker import Sticker
+from .attachment import Attachment
+from .embed import Embed
+from .member import GuildMember
+from .reaction import PartialEmoji, Reaction
+from .user import User
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -22,15 +29,72 @@ from ..utils import snowflake_to_datetime
 
 if TYPE_CHECKING:
     from ..state import ConnectionState
-    from ..sticker import Sticker
     from ..file import File
     from ..http import HTTPClient
-    from .attachment import Attachment
-    from .member import GuildMember
     from .channel import Channel
     from .guild import Guild
-    from .reaction import PartialEmoji, Reaction
-    from .user import User
+
+
+@dataclass(slots=True)
+class ChannelMention:
+    """A channel that message content links by ID.
+
+    Attributes:
+        id: Channel ID.
+        name: Channel name.
+        type: Channel type.
+        guild_id: Guild the channel belongs to, when the payload supplies it.
+    """
+
+    id: int
+    name: str = ""
+    type: int = 0
+    guild_id: int | None = None
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> ChannelMention:
+        """Build a ChannelMention from its decoded payload.
+
+        Args:
+            data: Channel mention object.
+
+        Returns:
+            The parsed channel mention.
+        """
+        return cls(
+            id=int(data["id"]),
+            name=data.get("name") or "",
+            type=data.get("type", 0),
+            guild_id=int(data["guild_id"]) if data.get("guild_id") else None,
+        )
+
+
+@dataclass(slots=True)
+class MessageCall:
+    """Call state attached to a call message.
+
+    Attributes:
+        participants: IDs of the users who joined the call.
+        ended_timestamp: When the call ended (ISO 8601), or None while it is ongoing.
+    """
+
+    participants: list[int] = field(default_factory=list)
+    ended_timestamp: str | None = None
+
+    @classmethod
+    def from_data(cls, data: dict[str, Any]) -> MessageCall:
+        """Build a MessageCall from its decoded payload.
+
+        Args:
+            data: Message call object.
+
+        Returns:
+            The parsed call state.
+        """
+        return cls(
+            participants=[int(item) for item in data.get("participants", [])],
+            ended_timestamp=data.get("ended_timestamp"),
+        )
 
 
 @dataclass(slots=True)
@@ -156,8 +220,8 @@ class MessageSnapshot:
         flags: Message flags, including any unnamed bits.
         mentions: IDs of mentioned users.
         mention_roles: IDs of mentioned roles.
-        mention_channels: Channel mention payloads.
-        embeds: Embed payloads.
+        mention_channels: Channels the snapshot content links by ID.
+        embeds: Embeds in the snapshot.
         attachments: Parsed message attachments.
         stickers: Parsed stickers.
         raw_data: Original snapshot fields, including unmodeled fields.
@@ -172,8 +236,8 @@ class MessageSnapshot:
     flags: MessageFlags = field(default_factory=MessageFlags)
     mentions: list[int] = field(default_factory=list)
     mention_roles: list[int] = field(default_factory=list)
-    mention_channels: list[dict[str, Any]] = field(default_factory=list)
-    embeds: list[dict[str, Any]] = field(default_factory=list)
+    mention_channels: list[ChannelMention] = field(default_factory=list)
+    embeds: list[Embed] = field(default_factory=list)
     attachments: list[Attachment] = field(default_factory=list)
     stickers: list[Sticker] = field(default_factory=list)
     raw_data: dict[str, Any] = field(default_factory=dict, repr=False)
@@ -215,9 +279,6 @@ class MessageSnapshot:
         Returns:
             The parsed snapshot.
         """
-        from ..sticker import Sticker
-        from .attachment import Attachment
-
         return cls(
             timestamp=data["timestamp"],
             content=data.get("content", ""),
@@ -226,10 +287,17 @@ class MessageSnapshot:
             flags=MessageFlags(data.get("flags", 0)),
             mentions=[int(item) for item in data.get("mentions", [])],
             mention_roles=[int(item) for item in data.get("mention_roles", [])],
-            mention_channels=[dict(item) for item in data.get("mention_channels", [])],
-            embeds=[dict(item) for item in data.get("embeds", [])],
-            attachments=[Attachment.from_data(item) for item in data.get("attachments", [])],
-            stickers=[Sticker.from_data(item, http) for item in data.get("stickers", [])],
+            mention_channels=[
+                ChannelMention.from_data(item)
+                for item in data.get("mention_channels", [])
+            ],
+            embeds=[Embed.from_dict(item) for item in data.get("embeds", [])],
+            attachments=[
+                Attachment.from_data(item) for item in data.get("attachments", [])
+            ],
+            stickers=[
+                Sticker.from_data(item, http) for item in data.get("stickers", [])
+            ],
             raw_data=dict(data),
         )
 
@@ -354,12 +422,14 @@ class Message:
         id: The ID of the message.
         channel_id: The ID of the channel.
         content: The text of the message, empty when the message has only media.
-        author: The user credited with the message.
+        author: The message author: their GuildMember when the payload includes
+            one or the member is cached, otherwise the User (always a User for
+            DMs and webhook messages).
         timestamp: Creation time derived from the message snowflake.
         edited_timestamp: Most recent edit time, or null when the message has never been edited.
         embeds: The previews resolved or supplied for the message.
         attachments: The files attached to the message.
-        member: Guild-specific author membership, when supplied by the payload.
+        member: The author's GuildMember, from the payload or the member cache.
         mentions: The users the message actively mentions.
         pinned: Whether the message is pinned.
         reactions: Reaction summaries.
@@ -379,6 +449,9 @@ class Message:
         message_snapshots: The immutable copies captured for a forward.
         stickers: The stickers sent with the message.
         users: Users referenced by non-notifying content, embed, and snapshot text.
+        channel_type: Channel type of the message's channel, supplied by Message Create.
+        nicks: Group DM nicknames by user ID, supplied by Message Create when any are stored.
+        mention_here: Whether the message has a here mention, supplied by Message Create.
         created_at: Return the UTC creation time encoded in this object's snowflake.
         channel: The channel this message was sent in (if cached).
         guild: The guild this message was sent in (if cached).
@@ -389,11 +462,11 @@ class Message:
     id: int
     channel_id: int
     content: str
-    author: User
+    author: User | GuildMember
     timestamp: str
     edited_timestamp: str | None = None
 
-    embeds: list[dict[str, Any]] = field(default_factory=list)
+    embeds: list[Embed] = field(default_factory=list)
     attachments: list[Attachment] = field(default_factory=list)
     member: GuildMember | None = None
     mentions: list[User] = field(default_factory=list)
@@ -407,19 +480,23 @@ class Message:
     tts: bool = False
     nonce: str | None = None
     webhook_id: int | None = None
-    call: dict[str, Any] | None = None
+    call: MessageCall | None = None
     _guild_id: int | None = None
     mention_roles: list[int] = field(default_factory=list)
     nsfw_emojis: list[int] = field(default_factory=list)
-    mention_channels: list[dict[str, Any]] = field(default_factory=list)
+    mention_channels: list[ChannelMention] = field(default_factory=list)
     message_snapshots: list[MessageSnapshot] = field(default_factory=list)
     stickers: list[Sticker] = field(default_factory=list)
     users: list[User] = field(default_factory=list)
+    channel_type: int | None = None
+    nicks: dict[int, str] = field(default_factory=dict)
+    mention_here: bool = False
 
     _state: ConnectionState | None = field(default=None, repr=False, compare=False)
     _http: HTTPClient | None = field(default=None, repr=False)
     _channel: Channel | None = field(default=None, repr=False)
     _guild: Guild | None = field(default=None, repr=False)
+    _member_from_cache: bool = field(default=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Normalize flags and bind the initial resolved message."""
@@ -449,13 +526,20 @@ class Message:
         Returns:
             A parsed Message instance.
         """
-        from ..sticker import Sticker
-        from .attachment import Attachment
-        from .member import GuildMember
-        from .reaction import Reaction
-        from .user import User
-
         author = User.from_data(data["author"], http)
+        member = (
+            GuildMember.from_data(
+                {**data["member"], "user": data["author"]},
+                http,
+                guild_id=int(data["guild_id"])
+                if data.get("guild_id") is not None
+                else None,
+            )
+            if data.get("member") is not None
+            else None
+        )
+        if member is not None:
+            member.user = author
         mentions = [User.from_data(u, http) for u in data.get("mentions", [])]
         attachments = [Attachment.from_data(a) for a in data.get("attachments", [])]
 
@@ -464,19 +548,11 @@ class Message:
             id=int(data["id"]),
             channel_id=int(data["channel_id"]),
             content=data.get("content", ""),
-            author=author,
-            member=GuildMember.from_data(
-                {**data["member"], "user": data["author"]},
-                http,
-                guild_id=int(data["guild_id"])
-                if data.get("guild_id") is not None
-                else None,
-            )
-            if data.get("member") is not None
-            else None,
+            author=member if member is not None else author,
+            member=member,
             timestamp=data["timestamp"],
             edited_timestamp=data.get("edited_timestamp"),
-            embeds=data.get("embeds", []),
+            embeds=[Embed.from_dict(item) for item in data.get("embeds", [])],
             attachments=attachments,
             mentions=mentions,
             pinned=data.get("pinned", False),
@@ -488,13 +564,18 @@ class Message:
             webhook_id=int(data["webhook_id"])
             if data.get("webhook_id") is not None
             else None,
-            call=data.get("call"),
+            call=MessageCall.from_data(data["call"])
+            if isinstance(data.get("call"), dict)
+            else None,
             _guild_id=int(data["guild_id"])
             if data.get("guild_id") is not None
             else None,
             mention_roles=[int(item) for item in data.get("mention_roles", [])],
             nsfw_emojis=[int(item) for item in data.get("nsfw_emojis", [])],
-            mention_channels=[dict(item) for item in data.get("mention_channels", [])],
+            mention_channels=[
+                ChannelMention.from_data(item)
+                for item in data.get("mention_channels", [])
+            ],
             message_snapshots=[
                 MessageSnapshot.from_data(item, http)
                 for item in data.get("message_snapshots", [])
@@ -503,6 +584,9 @@ class Message:
                 Sticker.from_data(item, http) for item in data.get("stickers", [])
             ],
             users=[User.from_data(item, http) for item in data.get("users", [])],
+            channel_type=data.get("channel_type"),
+            nicks={int(k): v for k, v in (data.get("nicks") or {}).items()},
+            mention_here=data.get("mention_here", False),
             _http=http,
             _state=getattr(http, "_state", None),
             referenced_message=(
@@ -536,8 +620,37 @@ class Message:
         message.reactions = [
             Reaction.from_data(r, http=http, message=message) for r in reactions_data
         ]
+        message._resolve_author()
 
         return message
+
+    def _resolve_author(self, *, live: bool = False) -> None:
+        """Upgrade ``author`` to the cached GuildMember when the payload had none.
+
+        Args:
+            live: Whether this message is live state. Live messages share the
+                cached member; HTTP snapshots get an independent copy of it.
+        """
+        if self.member is not None:
+            self.author = self.member
+            return
+        if self.webhook_id is not None or self._state is None:
+            return
+        guild_id = self.guild_id
+        if guild_id is None:
+            channel = self.channel
+            guild_id = channel.guild_id if channel is not None else None
+        if guild_id is None:
+            return
+        member = self._state.get_member(guild_id, self.author.id)
+        if member is None:
+            return
+        if not live:
+            http = member._http
+            member = deepcopy(member, {id(http): http} if http is not None else None)
+            self._member_from_cache = True
+        self.member = member
+        self.author = member
 
     @property
     def created_at(self) -> datetime:
@@ -557,7 +670,11 @@ class Message:
         """
         if self._channel is not None:
             return self._channel
-        return self._state.get_channel(self.channel_id) if self._state is not None else None
+        return (
+            self._state.get_channel(self.channel_id)
+            if self._state is not None
+            else None
+        )
 
     @property
     def guild(self) -> Guild | None:
@@ -568,7 +685,11 @@ class Message:
         """
         if self._guild is not None:
             return self._guild
-        return self._state.guilds.get(self.guild_id) if self._state is not None and self.guild_id is not None else None
+        return (
+            self._state.guilds.get(self.guild_id)
+            if self._state is not None and self.guild_id is not None
+            else None
+        )
 
     @property
     def guild_id(self) -> int | None:
@@ -818,9 +939,7 @@ class Message:
         if self._http is None:
             raise RuntimeError("Message is not bound to an HTTP client")
 
-        from .user import User as UserModel
-
-        user_id = user.id if isinstance(user, UserModel) else user
+        user_id = user.id if isinstance(user, User) else user
         await self._http.delete_reaction(self.channel_id, self.id, emoji, user_id)
 
     async def clear_reactions(self) -> None:
@@ -902,8 +1021,6 @@ class Message:
         Returns:
             The Reaction object that was added or updated
         """
-        from .reaction import Reaction
-
         # Find existing reaction with this emoji
         for reaction in self.reactions:
             if reaction.emoji == emoji:
@@ -974,6 +1091,8 @@ class Message:
 
 
 __all__ = (
+    "ChannelMention",
+    "MessageCall",
     "MessageReference",
     "DeletedReferencedMessage",
     "MessageSnapshot",

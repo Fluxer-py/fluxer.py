@@ -11,6 +11,8 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any, get_type_hints
 
+from ...enums import Permissions
+from ...permissions import _effective_permissions
 from .context import Context
 from .converter import _Greedy, run_converter
 from .cooldowns import BucketType, CooldownMapping, MaxConcurrency
@@ -21,6 +23,7 @@ from .errors import (
     CommandOnCooldown,
     CommandRegistrationError,
     DisabledCommand,
+    MissingPermissions,
     MissingRequiredArgument,
 )
 from .view import StringView
@@ -141,9 +144,7 @@ class Command:
         if params and params[0].name == "ctx":
             params = params[1:]
         return OrderedDict(
-            (param.name, param)
-            for param in params
-            if param.name not in {"self", "ctx"}
+            (param.name, param) for param in params if param.name not in {"self", "ctx"}
         )
 
     @property
@@ -841,10 +842,6 @@ async def _check_fluxer_permissions(
     *,
     guild_only: bool = False,
 ) -> bool:
-    from ...enums import Permissions
-    from ...permissions import _effective_permissions
-    from .errors import MissingPermissions
-
     unknown = set(name for name in perms if name.upper() not in Permissions.__members__)
     if unknown:
         raise ValueError(f"Unknown permissions: {', '.join(sorted(unknown))}")

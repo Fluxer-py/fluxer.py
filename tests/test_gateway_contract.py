@@ -1,7 +1,7 @@
 """Offline checks of command shapes and dispatch sequencing."""
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from fluxer.http import HTTPClient
 
@@ -112,3 +112,37 @@ async def test_close_awaits_owned_workers_and_discards_unsent_voice():
     await gw.close()
     assert sorted(cancelled) == ["heartbeat", "voice"]
     await asyncio.wait_for(gw._voice_state_queue.join(), 1)
+
+
+@pytest.mark.asyncio
+async def test_latency_measures_heartbeat_round_trip(monkeypatch):
+    clock = iter([100.0, 100.25])
+    monkeypatch.setattr("fluxer.gateway.time.perf_counter", lambda: next(clock))
+    gw = gateway()
+    gw._send = AsyncMock()
+    assert gw.latency == float("inf")
+    # An ACK with no heartbeat in flight must not produce a measurement.
+    await gw._handle_payload(GatewayPayload(GatewayOpcode.HEARTBEAT_ACK))
+    assert gw.latency == float("inf")
+    await gw._send_heartbeat()
+    await gw._handle_payload(GatewayPayload(GatewayOpcode.HEARTBEAT_ACK))
+    assert gw.latency == pytest.approx(0.25)
+    await gw.close()
+
+
+def test_client_latency_is_nan_without_gateway():
+    client = Client()
+    assert client.latency != client.latency
+
+
+@pytest.mark.asyncio
+async def test_first_heartbeat_is_sent_immediately():
+    gw = gateway()
+    gw._ws = MagicMock(closed=False)
+    gw._send = AsyncMock()
+    gw._heartbeat_interval = 3600
+    await gw._start_heartbeat()
+    await asyncio.sleep(0)
+    gw._send.assert_awaited_once()
+    assert gw._send.call_args.args[0].op == GatewayOpcode.HEARTBEAT
+    await gw._stop_heartbeat()
