@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.5.0-alpha.6] (development) - 2026-11-20
+
+### Added
+
+- Gateway events now use discord.py's names and arguments wherever Fluxer has the feature, with many new events (reactions, raw message events, guild availability, channels, members, presence, typing, invites, audit log, connection and debug events); see the "Events" docs page for the full list
+- Added threads: thread events and caching, `Channel.create_thread()`, `Message.create_thread()`, `edit()`, `join()`, `leave()`, `add_user()`, `remove_user()`, `fetch_members()`, `archived_threads()`, `Guild.active_threads()`, `commands.ThreadConverter` and the thread permissions; see the new "Threads" docs page
+- Added `Channel.edit()` and `Channel.delete()`
+- Added member presence: `GuildMember.status`, `activity`, `activities`, `custom_status`, `is_on_mobile()` and `is_afk()`, with the `Status` enum and `CustomStatus` model
+- Added `on_error`, `on_command` and `on_command_completion`, `Context.command_failed`, `Context.cog`, `Command.has_error_handler()` and `Cog.has_error_handler()`, and `on_command_error` listeners and `cog_command_error` now receive command errors
+- Added the `allowed_mentions` option to `Client` and `Bot`, `AllowedMentions.merge()`, and `mention_author` on sends and replies
+- Added coloured console logging set up by `run()` (with an optional `rich` extra), `fluxer.utils.setup_logging()`, and log messages for requests, rate limits and reconnects
+- Added cog `command_attrs`, such as `class Admin(commands.Cog, command_attrs=dict(hidden=True))`
+- Added `fluxer.utils.parse_time()` and top-level exports for `Invite`, `AuditLogEntry` and the raw event payload classes, and `Client.dispatch()` now resolves `wait_for()` calls
+
+### Changed
+
+- `Embed.timestamp` accepts a `datetime` or an ISO8601 string and is sent as UTC ISO8601
+- Guilds in the startup burst after `on_ready` fire `on_guild_available` instead of `on_guild_join`, and reorders fire one update event per changed channel or role
+- `AllowedMentions` fields left unset turn off when `users` or `roles` is a list, as Fluxer requires
+- Permission writes now declare Fluxer's `channel_threads` feature, so user accounts can set the thread permission bits
+
+### Fixed
+
+- `@command.error` handlers in cogs, global checks and failing `@bot.check_once` checks now work as documented
+- A cog without its own docstring no longer shows the base `Cog` docstring in help
+- `Channel.permissions_for()` on a thread now uses the parent channel's permissions, as Fluxer does
+
+### Breaking
+
+- `on_command_error` now also runs after a command's own `@command.error` handler, as in discord.py; to skip handled errors, start it with `if ctx.command and ctx.command.has_error_handler(): return`
+- Exceptions raised in a command body reach error handlers wrapped in `CommandInvokeError`; use `error.original` for the exception
+- Events that passed raw payload dicts now pass models, and `on_member_remove`, `on_message_delete` and `on_message_edit` fire only for cached objects; use the `on_raw_*` events or `on_<name>_data` for every payload, and see the "Events" docs page for each signature
+- `on_message_edit` receives `(before, after)` and `on_voice_state_update` receives `(member, before, after)`; update the handler signatures
+- `on_guild_remove` no longer fires when a guild becomes unavailable; listen to `on_guild_unavailable` for that
+- `Embed.timestamp` is an aware `datetime` instead of a string; use `embed.timestamp.isoformat()` where a string is needed
+
 ## [0.5.0-alpha.5] (development) - 2026-10-09
 
 ### Added

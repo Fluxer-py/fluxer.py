@@ -51,6 +51,8 @@ event-driven architecture.
 > 
 > Or the following command for Voice Support:
 > - `pip install "fluxer.py[voice] @ git+https://github.com/Fluxer-py/fluxer.py.git@rework"`
+> 
+> Add the `rich` extra for prettier console logs, for example `fluxer.py[voice,rich]`.
 
 >[!WARNING]
 > The following `pip install` instructions won't install the Rework version of Fluxer.py

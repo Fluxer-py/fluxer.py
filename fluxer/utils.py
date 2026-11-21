@@ -12,6 +12,8 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Any, Literal
 
+from ._logging import setup_logging
+from ._logging import stream_supports_colour as stream_supports_colour
 from .models.embed import Embed
 
 # Fluxer snowflakes use the 2015-01-01T00:00:00Z epoch.
@@ -55,6 +57,32 @@ def utcnow() -> datetime:
         The current time with UTC timezone information.
     """
     return datetime.now(timezone.utc)
+
+
+def parse_time(timestamp: str | None) -> datetime | None:
+    """Parse a Fluxer ISO8601 timestamp into an aware datetime.
+
+    Fluxer writes UTC timestamps with a ``Z`` suffix, which
+    ``datetime.fromisoformat`` cannot read before Python 3.11.
+
+    Args:
+        timestamp: ISO8601 string, or None.
+
+    Returns:
+        The aware datetime, or None when the timestamp is None or empty.
+    """
+    if not timestamp:
+        return None
+    parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _try_parse_time(timestamp: Any) -> datetime | None:
+    """Parse a gateway timestamp, returning None instead of raising on bad input."""
+    try:
+        return parse_time(timestamp)
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 _MARKDOWN_ESCAPE_SUBREGEX = "|".join(
@@ -244,6 +272,8 @@ __all__ = (
     "snowflake_to_datetime",
     "datetime_to_snowflake",
     "utcnow",
+    "parse_time",
+    "setup_logging",
     "remove_markdown",
     "escape_markdown",
     "format_dt",

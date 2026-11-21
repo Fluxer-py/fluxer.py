@@ -83,6 +83,55 @@ Optional collections are empty when omitted. `raw_data` retains the original
 snapshot fields, including fields without typed properties. A snapshot contains
 only the fields supplied by Fluxer; it does not resolve a source message.
 
+## Embed timestamps
+
+`Embed.timestamp` is an aware `datetime`. Pass a `datetime` or an ISO8601
+string and the library normalises it; naive datetimes are taken as local time,
+the same rule `format_dt` uses. Outgoing embeds send the timestamp as a UTC
+ISO8601 string, and received embeds parse Fluxer's `...Z` strings into a
+datetime, so no manual conversion is needed in either direction:
+
+```py
+from fluxer.utils import utcnow
+
+embed = fluxer.Embed(title="Report", timestamp=utcnow())
+embed.timestamp = "2026-08-31T09:14:02.000Z"  # also accepted
+print(message.embeds[0].timestamp.year)  # datetime on received embeds
+```
+
+## Allowed mentions
+
+`AllowedMentions` decides which mentions in a message's text notify anyone. It
+works as in discord.py: pass it per message, or set it once on the client and
+every message uses it. A per-message object only replaces the fields it sets.
+
+```py
+bot = fluxer.Bot(
+    command_prefix="!",
+    allowed_mentions=fluxer.AllowedMentions(everyone=False),
+)
+
+# Only the command author is pinged, and the reply does not ping anyone else.
+await ctx.send(
+    f"{ctx.author.mention} done!",
+    allowed_mentions=fluxer.AllowedMentions(users=[ctx.author]),
+)
+
+# Reply without notifying the author of the original message.
+await message.reply("pong", mention_author=False)
+```
+
+`users` and `roles` take users, members, roles, `fluxer.Object` or plain IDs,
+at most 100 each. `send`, `reply`, `edit` and webhook sends all accept
+`allowed_mentions`, and `send` and `reply` also accept `mention_author`. On an
+edit, the client-wide policy is only applied when the text changes, and
+`allowed_mentions=None` clears the stored policy.
+
+Fluxer does not let a message list specific users or roles and also allow whole
+categories such as `@everyone`. When `users` or `roles` is a list, every
+category you did not set is turned off. Setting one to `True` next to a list,
+as in `AllowedMentions(everyone=True, users=[member])`, raises `ValueError`.
+
 ## Message and attachment flags
 
 `Message.flags` and `WebhookMessage.flags` expose `MessageFlags`. The boolean

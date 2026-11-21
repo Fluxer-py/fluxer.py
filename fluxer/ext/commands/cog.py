@@ -17,6 +17,8 @@ class CogMeta(type):
     Attributes:
         __cog_commands__: Commands collected from the class and its bases.
         __cog_listeners__: Event names and method names collected from the class hierarchy.
+        __cog_settings__: The ``command_attrs`` given in the class statement, applied
+            to every command of the cog that does not set them itself.
     """
 
     def __new__(
@@ -32,8 +34,11 @@ class CogMeta(type):
             name: Name to assign or resolve in this operation.
             bases: Bases used by this operation.
             attrs: Attrs used by this operation.
-            **kwargs: Additional options forwarded to the underlying operation.
+            **kwargs: Class keywords; ``command_attrs`` is a dict of command
+                attributes, such as ``hidden=True``, applied to every command of the
+                cog that does not set them itself.
         """
+        settings = dict(kwargs.pop("command_attrs", {}))
         commands: list[Command] = []
         listeners: list[tuple[str, str]] = []
         cls = super().__new__(mcls, name, bases, attrs)
@@ -47,6 +52,7 @@ class CogMeta(type):
                     listeners.append((listener_name, attr_name))
         cls.__cog_commands__ = commands  # type: ignore[attr-defined]
         cls.__cog_listeners__ = listeners  # type: ignore[attr-defined]
+        cls.__cog_settings__ = settings  # type: ignore[attr-defined]
         return cls
 
 
@@ -100,12 +106,14 @@ class Cog(metaclass=CogMeta):
 
     @property
     def description(self) -> str:
-        """Description.
+        """The cog's own docstring, shown by the help command.
 
         Returns:
-            The result of this operation.
+            The cleaned docstring, or an empty string when the cog class has none.
+            A parent class's docstring is not inherited.
         """
-        return inspect.getdoc(self.__class__) or ""
+        own = type(self).__dict__.get("__doc__")
+        return inspect.cleandoc(own) if isinstance(own, str) else ""
 
     def get_commands(self) -> list[Command]:
         """Get commands.
@@ -156,16 +164,26 @@ class Cog(metaclass=CogMeta):
         pass
 
     async def cog_command_error(self, ctx: Any, error: Exception) -> None:
-        """Cog command error.
+        """Handle errors from this cog's commands; override it to use it.
+
+        Runs after the command's own ``@command.error`` handler and before the
+        bot's ``on_command_error``.
 
         Args:
-            ctx: Command invocation context, including the author, channel, and guild.
-            error: Failure being reported to the command or task error handler.
+            ctx: Invocation context of the failed command.
+            error: The command error.
 
         Returns:
             None.
         """
-        raise error
+
+    def has_error_handler(self) -> bool:
+        """Return whether this cog overrides ``cog_command_error``.
+
+        Returns:
+            Whether the cog has its own command error handler.
+        """
+        return type(self).cog_command_error is not Cog.cog_command_error
 
     async def cog_before_invoke(self, ctx: Any) -> None:
         """Cog before invoke.

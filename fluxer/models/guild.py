@@ -19,6 +19,7 @@ from .channel import Channel
 from .emoji import Emoji
 from .member import GuildMember
 from .role import Role
+from .thread import ThreadMember
 from ..audit_logs import AuditLog
 from ..invite import Invite
 from ..sticker import Sticker
@@ -65,6 +66,7 @@ class Guild(_GuildImages):
         member_cache_complete: Whether a tracked full roster reconciles with the guild's member count.
         emojis: Guild emojis.
         stickers: Guild stickers.
+        threads: Active threads the session can view; archived threads leave the cache.
         banner_hash: Guild banner hash.
         splash_hash: Invite splash hash.
         embed_splash_hash: Embedded invite splash hash.
@@ -120,6 +122,7 @@ class Guild(_GuildImages):
     members: Sequence[GuildMember] = field(default_factory=list)
     emojis: Sequence[Emoji] = field(default_factory=list)
     stickers: Sequence[Sticker] = field(default_factory=list)
+    threads: Sequence[Channel] = field(default_factory=list)
     _member_cache_complete: bool = field(default=False, repr=False)
 
     banner_hash: str | None = None
@@ -159,7 +162,7 @@ class Guild(_GuildImages):
 
     def __setattr__(self, name: str, value: Any) -> None:
         """Convert constructor collections to read-only views."""
-        if name in ("roles", "channels", "members", "emojis", "stickers"):
+        if name in ("roles", "channels", "members", "emojis", "stickers", "threads"):
             if hasattr(self, name):
                 raise AttributeError(f"Guild.{name} is a read-only cache view")
             value = _EntitySequence(value)
@@ -184,6 +187,10 @@ class Guild(_GuildImages):
     @property
     def _stickers(self) -> dict[int, Sticker]:
         return cast(_EntitySequence[Sticker], self.stickers)._data
+
+    @property
+    def _threads(self) -> dict[int, Channel]:
+        return cast("_EntitySequence[Channel]", self.threads)._data
 
     @property
     def member_cache_complete(self) -> bool:
@@ -226,6 +233,28 @@ class Guild(_GuildImages):
             The channel, or None when it is not cached.
         """
         return self._channels.get(channel_id)
+
+    def get_thread(self, thread_id: int) -> Channel | None:
+        """Look up a cached active thread.
+
+        Args:
+            thread_id: Thread ID to look up.
+
+        Returns:
+            The thread, or None when it is not cached.
+        """
+        return self._threads.get(thread_id)
+
+    def get_channel_or_thread(self, channel_id: int) -> Channel | None:
+        """Look up a cached channel or active thread.
+
+        Args:
+            channel_id: Channel or thread ID to look up.
+
+        Returns:
+            The channel or thread, or None when neither is cached.
+        """
+        return self._channels.get(channel_id) or self._threads.get(channel_id)
 
     def get_role(self, role_id: int) -> Role | None:
         """Look up a cached role.
@@ -279,6 +308,10 @@ class Guild(_GuildImages):
                 Sticker.from_data(sticker, http, guild_id=guild_id)
                 for sticker in data.get("stickers", [])
             ],
+            threads=[
+                Channel.from_data({**thread, "guild_id": str(guild_id)}, http)
+                for thread in data.get("threads", [])
+            ],
             banner_hash=data.get("banner", None),
             splash_hash=data.get("splash", None),
             embed_splash_hash=data.get("embed_splash", None),
@@ -324,6 +357,8 @@ class Guild(_GuildImages):
 
         for channel in guild.channels:
             channel._guild = guild
+        for thread in guild.threads:
+            thread._guild = guild
         return guild
 
     @property
@@ -350,6 +385,41 @@ class Guild(_GuildImages):
             _snapshot(Emoji.from_data, emoji_data, self._http, guild_id=self.id)
             for emoji_data in data
         ]
+
+    async def active_threads(self) -> list[Channel]:
+        """Fetch every active thread in this guild the bot can see; bots only.
+
+        The result is not added to the cache, matching discord.py.
+
+        Returns:
+            The active threads, newest first, with ``me`` set for joined threads.
+        """
+        if not self._http:
+            raise RuntimeError("Cannot fetch threads without HTTPClient")
+        data = await self._http.get_active_threads(self.id)
+        members = {
+            int(item["id"]): item
+            for item in data.get("members", [])
+            if item.get("id") is not None
+        }
+        user = self._state.user if self._state is not None else None
+        threads = []
+        for item in data.get("threads", []):
+            thread = _snapshot(
+                Channel.from_data, {**item, "guild_id": str(self.id)}, self._http
+            )
+            thread._guild = self
+            own = members.get(thread.id)
+            if own is not None and (own.get("user_id") or user is not None):
+                thread._me = ThreadMember.from_data(
+                    own,
+                    thread_id=thread.id,
+                    user_id=user.id if user is not None else None,
+                    guild_id=self.id,
+                    state=self._state,
+                )
+            threads.append(thread)
+        return threads
 
     # -- Role Management Methods --
     async def fetch_roles(self) -> list[Role]:

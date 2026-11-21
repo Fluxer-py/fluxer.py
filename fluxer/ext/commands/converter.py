@@ -34,6 +34,7 @@ from .errors import (
     MemberNotFound,
     MessageNotFound,
     RoleNotFound,
+    ThreadNotFound,
     UserNotFound,
 )
 
@@ -191,6 +192,44 @@ class TextChannelConverter(IDConverter):
 
 VoiceChannelConverter = TextChannelConverter
 CategoryChannelConverter = TextChannelConverter
+
+
+class ThreadConverter(Converter):
+    """Resolve a cached thread of the invoking guild.
+
+    Lookup order: ID, then <#id> mention, then exact name. Only threads in the
+    cache are found; archived threads leave it.
+
+    Attributes:
+        convert: Asynchronously resolve one command argument using the invocation context.
+    """
+
+    async def convert(self, ctx: Any, argument: str) -> Channel:
+        """Resolve command argument text to a thread.
+
+        Args:
+            ctx: Command invocation context, including the author, channel, and guild.
+            argument: Unconverted command argument text.
+
+        Returns:
+            The cached thread.
+
+        Raises:
+            ThreadNotFound: Used outside a guild, or no cached thread matched.
+        """
+        guild = ctx.guild
+        if guild is None:
+            raise ThreadNotFound(argument)
+        match = _ID_REGEX.match(argument)
+        if match is not None:
+            thread = guild.get_thread(
+                int(match.group("mention_id") or match.group("id"))
+            )
+        else:
+            thread = next((t for t in guild.threads if t.name == argument), None)
+        if thread is None:
+            raise ThreadNotFound(argument)
+        return thread
 
 
 class RoleConverter(IDConverter):
@@ -543,6 +582,7 @@ __all__ = (
     "MemberConverter",
     "GuildConverter",
     "TextChannelConverter",
+    "ThreadConverter",
     "RoleConverter",
     "MessageConverter",
     "ColourConverter",

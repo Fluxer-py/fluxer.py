@@ -42,7 +42,28 @@ class MessageFlags(BaseFlags):
         suppress_embeds: Whether embed rendering is suppressed.
         suppress_notifications: Whether ordinary mention notifications are suppressed.
         voice_message: Whether the message contains a voice recording.
+        has_thread: Whether a thread was started from the message.
+        failed_to_mention_some_roles_in_thread: Whether some mentioned roles could
+            not be added to the message's thread.
     """
+
+    @property
+    def has_thread(self) -> bool:
+        """Return whether a thread was started from the message.
+
+        Returns:
+            Whether the has-thread bit is set.
+        """
+        return bool(self.value & (1 << 5))
+
+    @property
+    def failed_to_mention_some_roles_in_thread(self) -> bool:
+        """Return whether some mentioned roles could not be added to the thread.
+
+        Returns:
+            Whether the failed-to-mention-roles bit is set.
+        """
+        return bool(self.value & (1 << 8))
 
     @property
     def suppress_embeds(self) -> bool:

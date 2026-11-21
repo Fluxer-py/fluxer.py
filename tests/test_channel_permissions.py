@@ -267,12 +267,12 @@ async def test_permission_http_routes_validate_and_declare_feature() -> None:
         "deny": "0",
     }
     assert http.request.call_args.kwargs["headers"] == {
-        "X-Fluxer-Features": "view_channel_members_permission"
+        "X-Fluxer-Features": "view_channel_members_permission,channel_threads"
     }
     await http.delete_channel_permissions(30, 20)
     assert http.request.call_args.args[0].method == "DELETE"
     assert http.request.call_args.kwargs["headers"] == {
-        "X-Fluxer-Features": "view_channel_members_permission"
+        "X-Fluxer-Features": "view_channel_members_permission,channel_threads"
     }
     with pytest.raises(ValueError, match="Overwrite type"):
         await http.edit_channel_permissions(30, 20, type=2)

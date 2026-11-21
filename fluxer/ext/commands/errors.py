@@ -193,6 +193,24 @@ class ChannelNotFound(BadArgument):
         super().__init__(f"Channel {argument!r} was not found")
 
 
+class ThreadNotFound(BadArgument):
+    """A thread argument did not match a cached thread in the guild.
+
+    Attributes:
+        args: Exception arguments retained by Python.
+        argument: The argument that was not found.
+    """
+
+    def __init__(self, argument: str) -> None:
+        """Initialize the error for an unknown thread.
+
+        Args:
+            argument: Unconverted command argument text.
+        """
+        self.argument: str = argument
+        super().__init__(f"Thread {argument!r} not found.")
+
+
 class RoleNotFound(BadArgument):
     """Role Not Found data and behaviour.
 
@@ -636,6 +654,7 @@ __all__ = (
     "UserNotFound",
     "MessageNotFound",
     "ChannelNotFound",
+    "ThreadNotFound",
     "RoleNotFound",
     "EmojiNotFound",
     "BadColourArgument",

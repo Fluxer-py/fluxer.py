@@ -18,6 +18,7 @@ import aiohttp
 import emoji as emoji_lib
 from ._endpoints import Endpoints
 from ._types import UNSET, UnsetType, PinPage
+from .mentions import AllowedMentions, _resolve_allowed_mentions
 from .models.embed import Embed
 from .errors import (
     HTTPException,
@@ -41,6 +42,47 @@ DEFAULT_API_URL = "https://api.fluxer.app/v1"
 
 if TYPE_CHECKING:
     from .state import ConnectionState
+
+# User sessions must declare this capability or thread routes return 404; bots
+# ignore it (fluxer-docs/http-api/threads.mdx, "Route headers").
+_THREADS_FEATURE = "channel_threads"
+_THREADS_HEADERS = {"X-Fluxer-Features": _THREADS_FEATURE}
+# Gated permission bits are only writable when declared: VIEW_CHANNEL_MEMBERS
+# needs view_channel_members_permission and the thread bits need channel_threads.
+_PERMISSION_FEATURE_HEADERS = {
+    "X-Fluxer-Features": "view_channel_members_permission," + _THREADS_FEATURE
+}
+_ARCHIVE_DURATIONS = frozenset({60, 1440, 4320, 10080})
+
+
+def _thread_fields(
+    name: str | UnsetType,
+    auto_archive_duration: int | UnsetType,
+    rate_limit_per_user: int | None | UnsetType,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if not isinstance(name, UnsetType):
+        if not 1 <= len(name) <= 100:
+            raise ValueError("Thread names must be 1 to 100 characters")
+        payload["name"] = name
+    if not isinstance(auto_archive_duration, UnsetType):
+        if auto_archive_duration not in _ARCHIVE_DURATIONS:
+            raise ValueError("auto_archive_duration must be 60, 1440, 4320 or 10080")
+        payload["auto_archive_duration"] = auto_archive_duration
+    if not isinstance(rate_limit_per_user, UnsetType):
+        if rate_limit_per_user is not None and not 0 <= rate_limit_per_user <= 21600:
+            raise ValueError("rate_limit_per_user must be 0 to 21600 seconds")
+        payload["rate_limit_per_user"] = rate_limit_per_user
+    return payload
+
+
+def _archived_page_params(before: str | None, limit: int) -> dict[str, Any]:
+    if not 2 <= limit <= 100:
+        raise ValueError("Archived thread lists accept a page of 2 to 100 threads")
+    params: dict[str, Any] = {"limit": limit}
+    if before is not None:
+        params["before"] = before
+    return params
 
 
 def _payload_value(value: Any) -> Any:
@@ -174,6 +216,7 @@ class RateLimiter:
         self._held[bucket] = lock
         self._owners[bucket] = asyncio.current_task()
         try:
+            logged = False
             while True:
                 until = max(
                     self._global_until,
@@ -182,6 +225,11 @@ class RateLimiter:
                 delay = until - asyncio.get_running_loop().time()
                 if delay <= 0:
                     return
+                if not logged:
+                    log.debug(
+                        "Bucket %s is rate limited, waiting %.2f seconds", bucket, delay
+                    )
+                    logged = True
                 await asyncio.sleep(delay)
         except BaseException:
             self.release(bucket, {})
@@ -212,6 +260,19 @@ class RateLimiter:
                 previous = self._bucket_hashes.get(bucket, bucket)
                 scope = bucket.partition(":")[2]
                 identity = f"{values['x-ratelimit-bucket']}:{scope}"
+                if previous == bucket:
+                    log.debug(
+                        "%s has found its initial rate limit bucket hash (%s)",
+                        bucket,
+                        identity,
+                    )
+                elif previous != identity:
+                    log.debug(
+                        "A route (%s) has changed hashes: %s -> %s",
+                        bucket,
+                        previous,
+                        identity,
+                    )
                 self._bucket_hashes[bucket] = identity
                 self._reset_times[identity] = max(
                     self._reset_times.get(previous, 0.0),
@@ -296,6 +357,22 @@ class HTTPClient:
         self._rate_limiter = RateLimiter()
         self._invalidated = False
         self._user_id: int | None = None
+
+    def _default_allowed_mentions(self) -> AllowedMentions | None:
+        """Return the owning client's mention policy, if any."""
+        return getattr(self._state, "allowed_mentions", None)
+
+    def _edit_allowed_mentions(
+        self, value: Any, content: str | None | UnsetType
+    ) -> Any:
+        """Resolve an edit's mention policy.
+
+        As in discord.py, the client default only applies when the text changes.
+        """
+        previous = (
+            None if isinstance(content, UnsetType) else self._default_allowed_mentions()
+        )
+        return _resolve_allowed_mentions(value, previous)
 
     def _route(self, method: str, path: str, **params: Any) -> Route:
         return Route(method, path, **params)
@@ -421,6 +498,7 @@ class HTTPClient:
                 ) as response:
                     response_received = True
                     response_headers = response.headers
+                    log.debug("%s has returned %d", route.bucket, response.status)
                     raw = await response.text()
                     is_json = "json" in response.headers.get("Content-Type", "").lower()
                     if 200 <= response.status < 300:
@@ -455,6 +533,10 @@ class HTTPClient:
                     last_error = error
                     if response.status == 429:
                         if body.get("global"):
+                            log.warning(
+                                "Global rate limit has been hit. Retrying in %.2f seconds.",
+                                retry_delay,
+                            )
                             self._rate_limiter.set_global(retry_delay)
                             if (
                                 not self.is_bot
@@ -462,17 +544,34 @@ class HTTPClient:
                                 and base == self.api_url
                                 and self.token.startswith("flx_")
                             ):
+                                log.error(
+                                    "A global rate limit revoked the user session; "
+                                    "a new token is required"
+                                )
                                 self._invalidated = True
                                 if isinstance(error, RateLimited):
                                     error.session_invalidated = True
                                 raise error
                         else:
+                            log.warning(
+                                "We are being rate limited. %s responded with 429. "
+                                "Retrying in %.2f seconds.",
+                                route.bucket,
+                                retry_delay,
+                            )
                             self._rate_limiter._deny(route.bucket, retry_delay)
                     elif response.status >= 500:
                         retry_delay = 1.0 + attempt
+                        log.warning(
+                            "%s returned %d, retrying in %.2f seconds (attempt %d)",
+                            route.bucket,
+                            response.status,
+                            retry_delay,
+                            attempt + 1,
+                        )
                     else:
                         raise error
-            except (aiohttp.ClientError, asyncio.TimeoutError):
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 if (
                     response_received
                     or not replayable
@@ -486,14 +585,28 @@ class HTTPClient:
                         f"Transport failed for {route.method} {route.path}",
                     ) from None
                 retry_delay = 1.0 + attempt
+                log.warning(
+                    "Request %s failed with %s, retrying in %.2f seconds",
+                    route.bucket,
+                    type(exc).__name__,
+                    retry_delay,
+                )
             finally:
                 self._rate_limiter.release(route.bucket, response_headers)
             if not replayable or (not forever and attempt >= retries):
                 assert error is not None
+                if error.status in (429,) or error.status >= 500:
+                    log.warning(
+                        "%s gave up after %d retries with status %d",
+                        route.bucket,
+                        attempt,
+                        error.status,
+                    )
                 raise error
             attempt += 1
             if retry_delay:
                 await asyncio.sleep(retry_delay)
+                log.debug("Done sleeping for the rate limit. Retrying %s", route.bucket)
 
     async def get_gateway(self) -> dict[str, Any]:
         """Resolve a Gateway URL for the configured credential kind.
@@ -659,6 +772,7 @@ class HTTPClient:
         favorite_meme_id: int | str | None = None,
         sticker_ids: list[int | str] | None = None,
         tts: bool | None = None,
+        mention_author: bool | None = None,
     ) -> dict[str, Any]:
         """POST /channels/{channel_id}/messages.
 
@@ -670,12 +784,14 @@ class HTTPClient:
             files: List of file objects to attach
             message_reference: Reference to another message for replies
                 Example: {"message_id": "123456789", "channel_id": "987654321"}
-            allowed_mentions: Controls which mentions trigger notifications
+            allowed_mentions: Controls which mentions trigger notifications;
+                an ``AllowedMentions`` is merged over the client default.
             flags: Bit mask governing the object's documented flags.
             nonce: Caller-selected correlation value echoed by the operation when supported.
             favorite_meme_id: Identity of the favorite meme used by this operation.
             sticker_ids: IDs of the sticker resources selected by this operation.
             tts: Whether the message requests text-to-speech playback.
+            mention_author: Overrides ``replied_user`` of the mention policy.
 
         Returns:
             The result of this operation.
@@ -698,8 +814,13 @@ class HTTPClient:
             payload["embeds"] = normalized
         if message_reference is not None:
             payload["message_reference"] = _payload_value(message_reference)
-        if allowed_mentions is not None:
-            payload["allowed_mentions"] = _payload_value(allowed_mentions)
+        mentions = _resolve_allowed_mentions(
+            UNSET if allowed_mentions is None else allowed_mentions,
+            self._default_allowed_mentions(),
+            mention_author=mention_author,
+        )
+        if not isinstance(mentions, UnsetType):
+            payload["allowed_mentions"] = mentions
         if flags is not None:
             payload["flags"] = flags
         if nonce is not None:
@@ -809,8 +930,9 @@ class HTTPClient:
             payload["content"] = content
         if embeds is not None:
             payload["embeds"] = embeds
-        if not isinstance(allowed_mentions, UnsetType):
-            payload["allowed_mentions"] = _payload_value(allowed_mentions)
+        mentions = self._edit_allowed_mentions(allowed_mentions, content)
+        if not isinstance(mentions, UnsetType):
+            payload["allowed_mentions"] = mentions
         if flags is not None:
             payload["flags"] = flags
         if attachments is not None:
@@ -1372,7 +1494,7 @@ class HTTPClient:
         result = await self.request(
             self._route("POST", "/guilds/{guild_id}/roles", guild_id=guild_id),
             json=payload,
-            headers={"X-Fluxer-Features": "view_channel_members_permission"},
+            headers=_PERMISSION_FEATURE_HEADERS,
         )
         if hoist or mentionable:
             result = await self.modify_guild_role(
@@ -1430,7 +1552,7 @@ class HTTPClient:
             ),
             json=payload,
             reason=reason,
-            headers={"X-Fluxer-Features": "view_channel_members_permission"},
+            headers=_PERMISSION_FEATURE_HEADERS,
         )
 
     async def delete_guild_role(
@@ -1742,7 +1864,7 @@ class HTTPClient:
         return await self.request(
             self._route("POST", "/guilds/{guild_id}/channels", guild_id=guild_id),
             json=payload,
-            headers={"X-Fluxer-Features": "view_channel_members_permission"},
+            headers=_PERMISSION_FEATURE_HEADERS,
         )
 
     async def modify_channel(
@@ -1755,9 +1877,14 @@ class HTTPClient:
         position: int | None = None,
         parent_id: int | str | None | UnsetType = UNSET,
         nsfw: bool | None | UnsetType = UNSET,
+        reason: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """PATCH /channels/{channel_id}.
+
+        Thread fields (``archived``, ``locked``, ``invitable``,
+        ``auto_archive_duration``) and the ``default_*`` thread settings pass
+        through ``kwargs``.
 
         Args:
             channel_id: Identity of the channel used by this operation.
@@ -1767,6 +1894,7 @@ class HTTPClient:
             position: Position used by this operation.
             parent_id: Identity of the parent used by this operation.
             nsfw: Nsfw used by this operation.
+            reason: Audit log reason.
             **kwargs: Additional options forwarded to the underlying operation.
 
         Returns:
@@ -1793,20 +1921,26 @@ class HTTPClient:
         return await self.request(
             self._route("PATCH", "/channels/{channel_id}", channel_id=channel_id),
             json=payload,
-            headers={"X-Fluxer-Features": "view_channel_members_permission"},
+            reason=reason,
+            headers=_PERMISSION_FEATURE_HEADERS,
         )
 
-    async def delete_channel(self, channel_id: int | str) -> None:
+    async def delete_channel(
+        self, channel_id: int | str, *, reason: str | None = None
+    ) -> None:
         """DELETE /channels/{channel_id}.
 
         Args:
             channel_id: Identity of the channel used by this operation.
+            reason: Audit log reason.
 
         Returns:
             None.
         """
         await self.request(
-            self._route("DELETE", "/channels/{channel_id}", channel_id=channel_id)
+            self._route("DELETE", "/channels/{channel_id}", channel_id=channel_id),
+            reason=reason,
+            headers=_THREADS_HEADERS,
         )
 
     async def edit_channel_permissions(
@@ -1870,7 +2004,7 @@ class HTTPClient:
                 overwrite_id=overwrite_id,
             ),
             json=payload,
-            headers={"X-Fluxer-Features": "view_channel_members_permission"},
+            headers=_PERMISSION_FEATURE_HEADERS,
         )
 
     async def delete_channel_permissions(
@@ -1894,7 +2028,327 @@ class HTTPClient:
                 channel_id=channel_id,
                 overwrite_id=overwrite_id,
             ),
-            headers={"X-Fluxer-Features": "view_channel_members_permission"},
+            headers=_PERMISSION_FEATURE_HEADERS,
+        )
+
+    async def start_thread_with_message(
+        self,
+        channel_id: int | str,
+        message_id: int | str,
+        *,
+        name: str,
+        auto_archive_duration: int | UnsetType = UNSET,
+        rate_limit_per_user: int | None | UnsetType = UNSET,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /channels/{channel_id}/messages/{message_id}/threads.
+
+        Starts a public thread (or an announcement thread in an announcement
+        channel) whose ID is the source message's ID.
+
+        Args:
+            channel_id: Text or announcement channel holding the message.
+            message_id: Message to start the thread from.
+            name: Thread name, 1 to 100 characters.
+            auto_archive_duration: Minutes of inactivity before archiving; one of
+                60, 1440, 4320 or 10080. Fluxer defaults to 4320.
+            rate_limit_per_user: Slowmode in seconds (0-21600); defaults to the
+                parent's.
+            reason: Audit log reason.
+
+        Returns:
+            The created thread channel object.
+        """
+        payload = _thread_fields(name, auto_archive_duration, rate_limit_per_user)
+        return await self.request(
+            self._route(
+                "POST",
+                "/channels/{channel_id}/messages/{message_id}/threads",
+                channel_id=channel_id,
+                message_id=message_id,
+            ),
+            json=payload,
+            reason=reason,
+            headers=_THREADS_HEADERS,
+        )
+
+    async def start_thread_without_message(
+        self,
+        channel_id: int | str,
+        *,
+        name: str,
+        type: int,
+        auto_archive_duration: int | UnsetType = UNSET,
+        invitable: bool | UnsetType = UNSET,
+        rate_limit_per_user: int | None | UnsetType = UNSET,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /channels/{channel_id}/threads for a text or announcement parent.
+
+        Args:
+            channel_id: Text or announcement channel to start the thread in.
+            name: Thread name, 1 to 100 characters.
+            type: Thread channel type (10, 11 or 12); required by Fluxer.
+            auto_archive_duration: Minutes of inactivity before archiving; one of
+                60, 1440, 4320 or 10080. Fluxer defaults to 4320.
+            invitable: Whether non-moderators can add members; private threads only.
+            rate_limit_per_user: Slowmode in seconds (0-21600); defaults to the
+                parent's.
+            reason: Audit log reason.
+
+        Returns:
+            The created thread channel object.
+        """
+        payload = _thread_fields(name, auto_archive_duration, rate_limit_per_user)
+        payload["type"] = int(type)
+        if not isinstance(invitable, UnsetType):
+            payload["invitable"] = invitable
+        return await self.request(
+            self._route(
+                "POST", "/channels/{channel_id}/threads", channel_id=channel_id
+            ),
+            json=payload,
+            reason=reason,
+            headers=_THREADS_HEADERS,
+        )
+
+    async def join_thread(self, channel_id: int | str) -> None:
+        """PUT /channels/{channel_id}/thread-members/@me.
+
+        Args:
+            channel_id: Thread to join.
+
+        Returns:
+            None.
+        """
+        await self.request(
+            self._route(
+                "PUT",
+                "/channels/{channel_id}/thread-members/@me",
+                channel_id=channel_id,
+            ),
+            headers=_THREADS_HEADERS,
+        )
+
+    async def leave_thread(self, channel_id: int | str) -> None:
+        """DELETE /channels/{channel_id}/thread-members/@me.
+
+        Args:
+            channel_id: Thread to leave.
+
+        Returns:
+            None.
+        """
+        await self.request(
+            self._route(
+                "DELETE",
+                "/channels/{channel_id}/thread-members/@me",
+                channel_id=channel_id,
+            ),
+            headers=_THREADS_HEADERS,
+        )
+
+    async def add_thread_member(
+        self, channel_id: int | str, user_id: int | str
+    ) -> None:
+        """PUT /channels/{channel_id}/thread-members/{user_id}.
+
+        Args:
+            channel_id: Thread to add the user to.
+            user_id: User to add.
+
+        Returns:
+            None.
+        """
+        await self.request(
+            self._route(
+                "PUT",
+                "/channels/{channel_id}/thread-members/{user_id}",
+                channel_id=channel_id,
+                user_id=user_id,
+            ),
+            headers=_THREADS_HEADERS,
+        )
+
+    async def remove_thread_member(
+        self, channel_id: int | str, user_id: int | str
+    ) -> None:
+        """DELETE /channels/{channel_id}/thread-members/{user_id}.
+
+        Args:
+            channel_id: Thread to remove the user from.
+            user_id: User to remove.
+
+        Returns:
+            None.
+        """
+        await self.request(
+            self._route(
+                "DELETE",
+                "/channels/{channel_id}/thread-members/{user_id}",
+                channel_id=channel_id,
+                user_id=user_id,
+            ),
+            headers=_THREADS_HEADERS,
+        )
+
+    async def get_thread_member(
+        self,
+        channel_id: int | str,
+        user_id: int | str,
+        *,
+        with_member: bool = False,
+    ) -> dict[str, Any]:
+        """GET /channels/{channel_id}/thread-members/{user_id}; bots only.
+
+        Args:
+            channel_id: Thread to read.
+            user_id: User whose membership to fetch.
+            with_member: Whether to include the guild member object.
+
+        Returns:
+            The thread member object.
+        """
+        return await self.request(
+            self._route(
+                "GET",
+                "/channels/{channel_id}/thread-members/{user_id}",
+                channel_id=channel_id,
+                user_id=user_id,
+            ),
+            params={"with_member": "true"} if with_member else None,
+            headers=_THREADS_HEADERS,
+        )
+
+    async def get_thread_members(
+        self,
+        channel_id: int | str,
+        *,
+        with_member: bool = False,
+        after: int | str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """GET /channels/{channel_id}/thread-members; bots only.
+
+        Args:
+            channel_id: Thread to read.
+            with_member: Whether to include each guild member object.
+            after: Return members with a user ID above this one.
+            limit: Page size, 1 to 100.
+
+        Returns:
+            Thread member objects in ascending user ID order.
+        """
+        if not 1 <= limit <= 100:
+            raise ValueError("Thread member lists accept a page of 1 to 100 members")
+        params: dict[str, Any] = {"limit": limit}
+        if with_member:
+            params["with_member"] = "true"
+        if after is not None:
+            params["after"] = str(after)
+        return await self.request(
+            self._route(
+                "GET", "/channels/{channel_id}/thread-members", channel_id=channel_id
+            ),
+            params=params,
+            headers=_THREADS_HEADERS,
+        )
+
+    async def get_active_threads(self, guild_id: int | str) -> dict[str, Any]:
+        """GET /guilds/{guild_id}/threads/active; bots only.
+
+        Args:
+            guild_id: Guild to list.
+
+        Returns:
+            ``{"threads": [...], "members": [...]}``, newest thread first.
+        """
+        return await self.request(
+            self._route("GET", "/guilds/{guild_id}/threads/active", guild_id=guild_id),
+            headers=_THREADS_HEADERS,
+        )
+
+    async def get_public_archived_threads(
+        self,
+        channel_id: int | str,
+        *,
+        before: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """GET /channels/{channel_id}/threads/archived/public.
+
+        Args:
+            channel_id: Parent channel.
+            before: ISO8601 archive timestamp; returns threads archived before it.
+            limit: Page size, 2 to 100.
+
+        Returns:
+            ``{"threads", "members", "has_more"}``, most recently archived first.
+        """
+        return await self.request(
+            self._route(
+                "GET",
+                "/channels/{channel_id}/threads/archived/public",
+                channel_id=channel_id,
+            ),
+            params=_archived_page_params(before, limit),
+            headers=_THREADS_HEADERS,
+        )
+
+    async def get_private_archived_threads(
+        self,
+        channel_id: int | str,
+        *,
+        before: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """GET /channels/{channel_id}/threads/archived/private; moderators only.
+
+        Args:
+            channel_id: Parent channel.
+            before: ISO8601 archive timestamp; returns threads archived before it.
+            limit: Page size, 2 to 100.
+
+        Returns:
+            ``{"threads", "members", "has_more"}``, most recently archived first.
+        """
+        return await self.request(
+            self._route(
+                "GET",
+                "/channels/{channel_id}/threads/archived/private",
+                channel_id=channel_id,
+            ),
+            params=_archived_page_params(before, limit),
+            headers=_THREADS_HEADERS,
+        )
+
+    async def get_joined_private_archived_threads(
+        self,
+        channel_id: int | str,
+        *,
+        before: int | str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """GET /channels/{channel_id}/users/@me/threads/archived/private.
+
+        Args:
+            channel_id: Parent channel.
+            before: Thread ID; returns joined threads with a lower ID.
+            limit: Page size, 2 to 100.
+
+        Returns:
+            ``{"threads", "members", "has_more"}``, newest thread first.
+        """
+        return await self.request(
+            self._route(
+                "GET",
+                "/channels/{channel_id}/users/@me/threads/archived/private",
+                channel_id=channel_id,
+            ),
+            params=_archived_page_params(
+                str(before) if before is not None else None, limit
+            ),
+            headers=_THREADS_HEADERS,
         )
 
     async def modify_current_user(
@@ -2609,8 +3063,12 @@ class HTTPClient:
             payload["username"] = username
         if avatar_url is not None:
             payload["avatar_url"] = avatar_url
-        if allowed_mentions is not None:
-            payload["allowed_mentions"] = _payload_value(allowed_mentions)
+        mentions = _resolve_allowed_mentions(
+            UNSET if allowed_mentions is None else allowed_mentions,
+            self._default_allowed_mentions(),
+        )
+        if not isinstance(mentions, UnsetType):
+            payload["allowed_mentions"] = mentions
         if message_reference is not None:
             payload["message_reference"] = _payload_value(message_reference)
         if flags is not None:
@@ -2667,8 +3125,9 @@ class HTTPClient:
             payload["content"] = content
         if embeds is not None:
             payload["embeds"] = embeds
-        if not isinstance(allowed_mentions, UnsetType):
-            payload["allowed_mentions"] = _payload_value(allowed_mentions)
+        mentions = self._edit_allowed_mentions(allowed_mentions, content)
+        if not isinstance(mentions, UnsetType):
+            payload["allowed_mentions"] = mentions
         if flags is not None:
             payload["flags"] = flags
         return await self.request(route, json=payload)

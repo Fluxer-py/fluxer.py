@@ -8,7 +8,7 @@ from __future__ import annotations
 from .._model_factory import _snapshot
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from collections.abc import AsyncIterator, Callable, Generator
 from typing import TYPE_CHECKING, Any
 
@@ -26,9 +26,10 @@ from ..utils import process_embed_args
 from .member import GuildMember
 from .message import Message, PartialMessage
 from .role import Role
+from .thread import ThreadArchiveDuration, ThreadMember, ThreadMetadata
 from .user import User
 
-from ..enums import ChannelType
+from ..enums import THREAD_CHANNEL_TYPES, ChannelType
 from ..invite import Invite
 from ..fluxer_models import (
     SearchAuthorType,
@@ -39,7 +40,7 @@ from ..fluxer_models import (
     SearchSortOrder,
     parse_search_response,
 )
-from ..utils import snowflake_to_datetime
+from ..utils import datetime_to_snowflake, snowflake_to_datetime
 
 if TYPE_CHECKING:
     from ..state import ConnectionState
@@ -90,14 +91,30 @@ class Channel:
         bitrate: The voice bitrate in bits per second, present only for a guild voice channel.
         user_limit: The configured member occupancy limit, present only for a guild voice channel.
         voice_connection_limit: The number of simultaneous voice connections one user may hold, present only for a guild voice channel.
-        owner_id: The ID of the owner, present only for a group direct message.
+        owner_id: The ID of the owner of a group direct message, or the creator of a thread.
         last_message_id: The ID of the most recent message, null when the channel has none.
         nsfw_override: Whether this channel overrides the inherited age restriction, or null when it inherits.
         content_warning_level: The content warning level stored on this channel, present only for a guild channel.
-        rate_limit_per_user: The slowmode interval in seconds, present only for a guild text or voice channel.
+        rate_limit_per_user: The slowmode interval in seconds, for a guild text or voice channel or a thread.
         permission_overwrites: The overwrites applied to this channel, present only for a guild channel.
         nicks: The group direct message nicknames keyed by the decimal user ID (each 1-32 characters).
         recipients: The other recipients of a direct message or group direct message (max 49).
+        flags: Channel flags; on a thread only ``PINNED`` is ever set.
+        thread_metadata: Archive and lock state, present only on a thread.
+        message_count: Messages in a thread, excluding a forum post's first message.
+        total_message_sent: Messages ever sent in a thread.
+        member_count: Thread members, capped at 50 by Fluxer.
+        applied_tags: Forum tag IDs applied to a forum or media post.
+        is_thread: Whether this channel is a thread.
+        archived: Whether this thread is archived.
+        locked: Whether this thread is locked.
+        parent: The cached parent channel or category.
+        me: The current user's thread membership, when known.
+        thread_members: Cached thread memberships, populated by member events.
+        slowmode_delay: Alias of ``rate_limit_per_user``.
+        owner: The cached guild member who created this thread.
+        threads: The cached threads whose parent is this channel.
+        starter_message: The cached message this thread was started from.
         guild: Guild.
         mention: Mention.
         created_at: Return the UTC creation time encoded in this object's snowflake.
@@ -135,10 +152,20 @@ class Channel:
     )
     nicks: dict[str, str] = field(default_factory=dict)
     recipients: list[User] = field(default_factory=list)
+    flags: int = 0
+    thread_metadata: ThreadMetadata | None = None
+    message_count: int | None = None
+    total_message_sent: int | None = None
+    member_count: int | None = None
+    applied_tags: list[int] = field(default_factory=list)
 
     _state: ConnectionState | None = field(default=None, repr=False, compare=False)
     _http: HTTPClient | None = field(default=None, repr=False)
     _guild: Guild | None = field(default=None, repr=False)
+    _me: ThreadMember | None = field(default=None, repr=False, compare=False)
+    _thread_members: dict[int, ThreadMember] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     @classmethod
     def from_data(cls, data: dict[str, Any], http: HTTPClient | None = None) -> Channel:
@@ -185,6 +212,14 @@ class Channel:
             recipients=[
                 User.from_data(user, http) for user in data.get("recipients", [])
             ],
+            flags=int(data.get("flags", 0) or 0),
+            thread_metadata=ThreadMetadata.from_data(data["thread_metadata"])
+            if isinstance(data.get("thread_metadata"), dict)
+            else None,
+            message_count=data.get("message_count"),
+            total_message_sent=data.get("total_message_sent"),
+            member_count=data.get("member_count"),
+            applied_tags=[int(tag) for tag in data.get("applied_tags", [])],
             _http=http,
             _state=getattr(http, "_state", None),
         )
@@ -257,6 +292,126 @@ class Channel:
             Whether the documented condition holds for the current state.
         """
         return self.type == ChannelType.GUILD_CATEGORY
+
+    @property
+    def is_thread(self) -> bool:
+        """Whether this channel is an announcement, public, or private thread.
+
+        Returns:
+            Whether the channel type is a thread type.
+        """
+        return self.type in THREAD_CHANNEL_TYPES
+
+    @property
+    def archived(self) -> bool:
+        """Whether this thread is archived; always False for other channels.
+
+        Returns:
+            The archive flag from the thread metadata.
+        """
+        return self.thread_metadata is not None and self.thread_metadata.archived
+
+    @property
+    def locked(self) -> bool:
+        """Whether this thread is locked; always False for other channels.
+
+        Returns:
+            The lock flag from the thread metadata.
+        """
+        return self.thread_metadata is not None and self.thread_metadata.locked
+
+    @property
+    def parent(self) -> Channel | None:
+        """The cached parent: a thread's channel, or a channel's category.
+
+        Returns:
+            The parent channel, or None when there is none or it is not cached.
+        """
+        if self.parent_id is None or self._state is None:
+            return None
+        return self._state.channels.get(self.parent_id)
+
+    @property
+    def me(self) -> ThreadMember | None:
+        """The current user's membership in this thread.
+
+        Returns:
+            The membership, or None when the user is not a member or it is unknown.
+        """
+        return self._me
+
+    @property
+    def thread_members(self) -> list[ThreadMember]:
+        """Thread memberships cached from Thread Members Update events.
+
+        Fluxer sends no full thread roster on connect, so this list holds only the
+        members seen joining since the thread was cached.
+
+        Returns:
+            The cached memberships.
+        """
+        return list(self._thread_members.values())
+
+    @property
+    def slowmode_delay(self) -> int:
+        """Seconds a member must wait between messages; alias of ``rate_limit_per_user``.
+
+        Returns:
+            The slowmode interval in seconds, 0 when slowmode is off.
+        """
+        return self.rate_limit_per_user
+
+    @property
+    def owner(self) -> GuildMember | None:
+        """The cached guild member who created this thread.
+
+        Returns:
+            The member, or None for a non-thread channel or an uncached member.
+        """
+        if not self.is_thread or self.owner_id is None:
+            return None
+        guild = self.guild
+        return guild.get_member(self.owner_id) if guild is not None else None
+
+    @property
+    def threads(self) -> list[Channel]:
+        """The cached threads whose parent is this channel.
+
+        Returns:
+            The cached threads; archived threads leave the cache.
+        """
+        guild = self.guild
+        if guild is None:
+            return []
+        return [t for t in guild._threads.values() if t.parent_id == self.id]
+
+    def get_thread(self, thread_id: int, /) -> Channel | None:
+        """Look up a cached thread of this channel.
+
+        Args:
+            thread_id: The thread ID.
+
+        Returns:
+            The thread, or None when it is not cached or has another parent.
+        """
+        guild = self.guild
+        thread = guild.get_thread(thread_id) if guild is not None else None
+        if thread is None or thread.parent_id != self.id:
+            return None
+        return thread
+
+    @property
+    def starter_message(self) -> Message | None:
+        """The cached message this thread was started from.
+
+        A thread started from a message shares that message's ID.
+
+        Returns:
+            The message, or None when it is not cached.
+        """
+        if not self.is_thread or self._state is None:
+            return None
+        return self._state.messages.get(self.id)
 
     @property
     def overwrites(self) -> list[ChannelPermissionOverwrite]:
@@ -364,7 +519,16 @@ class Channel:
         Raises:
             TypeError: The channel is private or the argument is unsupported.
             RuntimeError: Required membership, ownership, roles, or channel context is incomplete.
+
+        Note:
+            Threads have no overwrites of their own; Fluxer resolves them with
+            their parent channel's permissions, so this delegates to ``parent``.
         """
+        if self.is_thread:
+            parent = self.parent
+            if parent is None:
+                raise RuntimeError("Thread parent channel is not cached")
+            return parent.permissions_for(member_or_user)
         guild = self._require_guild_context()
         member: GuildMember | None
         if isinstance(member_or_user, GuildMember):
@@ -485,6 +649,7 @@ class Channel:
         files: list[File] | None = None,
         message_reference: dict[str, Any] | None = None,
         allowed_mentions: Any | None = None,
+        mention_author: bool | None = None,
         **kwargs: Any,
     ) -> Message:
         """Send a message to this channel.
@@ -496,7 +661,10 @@ class Channel:
             file: A single File object to attach.
             files: Multiple File objects to attach.
             message_reference: Reference to another message for replies.
-            allowed_mentions: Controls which mentions notify users.
+            allowed_mentions: An ``AllowedMentions`` merged over the client's
+                ``allowed_mentions``, or a raw allowed mentions dict.
+            mention_author: Whether a reply notifies the replied-to author;
+                overrides ``replied_user``.
             **kwargs: Additional options forwarded to the underlying operation.
 
         Returns:
@@ -534,6 +702,7 @@ class Channel:
             files=file_list,
             message_reference=message_reference,
             allowed_mentions=allowed_mentions,
+            mention_author=mention_author,
             **combined_kwargs,
         )
         msg = _snapshot(Message.from_data, data, self._http)
@@ -879,6 +1048,350 @@ class Channel:
             sort_order=sort_order,
         )
         return parse_search_response(data, self._http)
+
+    def _require_http(self) -> HTTPClient:
+        if self._http is None:
+            raise RuntimeError("Channel is not bound to an HTTP client")
+        return self._http
+
+    def _require_thread(self, action: str) -> HTTPClient:
+        if not self.is_thread:
+            raise TypeError(f"Only threads can {action} (type={self.type})")
+        return self._require_http()
+
+    def _bind_thread(self, data: dict[str, Any], http: HTTPClient) -> Channel:
+        thread = _snapshot(Channel.from_data, data, http)
+        if thread.guild_id is None:
+            thread.guild_id = self.guild_id
+        thread._guild = self._guild
+        member = data.get("member")
+        if isinstance(member, dict):
+            thread._me = self._own_thread_member(member, thread.id)
+        return thread
+
+    def _own_thread_member(
+        self, data: dict[str, Any], thread_id: int
+    ) -> ThreadMember | None:
+        # Own memberships in thread lists may omit user_id; fill in the session
+        # user, and skip the membership when that is unknown (unbound channel).
+        user = self._state.user if self._state is not None else None
+        if data.get("user_id") is None and user is None:
+            return None
+        return self._thread_member(
+            data, thread_id, user_id=user.id if user is not None else None
+        )
+
+    def _thread_member(
+        self, data: dict[str, Any], thread_id: int, *, user_id: int | None = None
+    ) -> ThreadMember:
+        member = ThreadMember.from_data(
+            data,
+            thread_id=thread_id,
+            user_id=user_id,
+            guild_id=self.guild_id,
+            state=self._state,
+        )
+        guild_member = data.get("member")
+        if isinstance(guild_member, dict) and isinstance(
+            guild_member.get("user"), dict
+        ):
+            member._member = GuildMember.from_data(
+                guild_member, self._http, guild_id=self.guild_id
+            )
+        return member
+
+    async def edit(
+        self,
+        *,
+        name: str | UnsetType = UNSET,
+        topic: str | None | UnsetType = UNSET,
+        nsfw: bool | UnsetType = UNSET,
+        slowmode_delay: int | None | UnsetType = UNSET,
+        default_auto_archive_duration: ThreadArchiveDuration | None | UnsetType = UNSET,
+        default_thread_slowmode_delay: int | None | UnsetType = UNSET,
+        archived: bool | UnsetType = UNSET,
+        locked: bool | UnsetType = UNSET,
+        invitable: bool | UnsetType = UNSET,
+        auto_archive_duration: ThreadArchiveDuration | UnsetType = UNSET,
+        reason: str | None = None,
+    ) -> Channel:
+        """Edit this channel or thread; only the arguments you pass are sent.
+
+        Thread owners and moderators can rename, archive, lock and change
+        ``auto_archive_duration`` or ``invitable``; any member can unarchive.
+        Changing slowmode or unlocking needs a thread moderator.
+
+        Args:
+            name: New name, 1 to 100 characters for a thread.
+            topic: New topic; None clears it.
+            nsfw: Whether the channel is age restricted.
+            slowmode_delay: Slowmode in seconds (0-21600); None sets 0 on a thread.
+            default_auto_archive_duration: Stored default archive duration for
+                threads in a text or announcement channel; None clears it.
+            default_thread_slowmode_delay: Slowmode copied to new threads in this
+                channel; None clears it.
+            archived: Whether the thread is archived.
+            locked: Whether only moderators can act in the thread.
+            invitable: Whether non-moderators can add members to a private thread.
+            auto_archive_duration: Minutes of inactivity before the thread archives.
+            reason: Audit log reason.
+
+        Returns:
+            The updated channel.
+        """
+        http = self._require_http()
+        payload: dict[str, Any] = {}
+        if not isinstance(slowmode_delay, UnsetType):
+            payload["rate_limit_per_user"] = slowmode_delay
+        if not isinstance(default_auto_archive_duration, UnsetType):
+            payload["default_auto_archive_duration"] = default_auto_archive_duration
+        if not isinstance(default_thread_slowmode_delay, UnsetType):
+            payload["default_thread_rate_limit_per_user"] = (
+                default_thread_slowmode_delay
+            )
+        for key, value in (
+            ("archived", archived),
+            ("locked", locked),
+            ("invitable", invitable),
+            ("auto_archive_duration", auto_archive_duration),
+        ):
+            if not isinstance(value, UnsetType):
+                payload[key] = value
+        data = await http.modify_channel(
+            self.id, name=name, topic=topic, nsfw=nsfw, reason=reason, **payload
+        )
+        channel = _snapshot(Channel.from_data, data, http)
+        channel._guild = self._guild
+        channel._me = self._me
+        channel._thread_members = dict(self._thread_members)
+        return channel
+
+    async def delete(self, *, reason: str | None = None) -> None:
+        """Delete this channel or thread.
+
+        Args:
+            reason: Audit log reason.
+
+        Returns:
+            None.
+        """
+        await self._require_http().delete_channel(self.id, reason=reason)
+
+    async def create_thread(
+        self,
+        *,
+        name: str,
+        message: Any | None = None,
+        auto_archive_duration: ThreadArchiveDuration | UnsetType = UNSET,
+        type: ChannelType | int | None = None,
+        reason: str | None = None,
+        invitable: bool = True,
+        slowmode_delay: int | None = None,
+    ) -> Channel:
+        """Start a thread in this text or announcement channel.
+
+        With ``message``, the thread starts from that message and is public (an
+        announcement thread in an announcement channel); ``type`` and
+        ``invitable`` are ignored, as Fluxer does not accept them there.
+
+        Args:
+            name: Thread name, 1 to 100 characters.
+            message: The message, or its ID, to start the thread from.
+            auto_archive_duration: Minutes of inactivity before archiving. When
+                omitted Fluxer uses 4320; it does not apply the channel's
+                ``default_auto_archive_duration`` to new threads.
+            type: Thread type for a thread without a message; defaults to
+                ``ChannelType.PRIVATE_THREAD``.
+            reason: Audit log reason.
+            invitable: Whether non-moderators can add members to a private thread.
+            slowmode_delay: Slowmode in seconds; defaults to the channel's.
+
+        Returns:
+            The created thread.
+        """
+        http = self._require_http()
+        rate_limit: int | UnsetType = (
+            UNSET if slowmode_delay is None else slowmode_delay
+        )
+        if message is not None:
+            data = await http.start_thread_with_message(
+                self.id,
+                getattr(message, "id", message),
+                name=name,
+                auto_archive_duration=auto_archive_duration,
+                rate_limit_per_user=rate_limit,
+                reason=reason,
+            )
+        else:
+            thread_type = ChannelType.PRIVATE_THREAD if type is None else type
+            data = await http.start_thread_without_message(
+                self.id,
+                name=name,
+                type=int(thread_type),
+                auto_archive_duration=auto_archive_duration,
+                invitable=invitable
+                if thread_type == ChannelType.PRIVATE_THREAD
+                else UNSET,
+                rate_limit_per_user=rate_limit,
+                reason=reason,
+            )
+        return self._bind_thread(data, http)
+
+    async def archived_threads(
+        self,
+        *,
+        private: bool = False,
+        joined: bool = False,
+        limit: int | None = 100,
+        before: Any | datetime | None = None,
+    ) -> AsyncIterator[Channel]:
+        """Iterate over this channel's archived threads, newest first.
+
+        Private archived threads need a thread moderator; ``joined=True`` lists
+        only the private threads the current user is in.
+
+        Args:
+            private: Whether to list private instead of public threads.
+            joined: Whether to list only joined private threads; needs ``private``.
+            limit: Maximum threads to yield; None yields every thread.
+            before: A datetime, or an object with an ``id`` such as a thread,
+                bounding the results.
+
+        Yields:
+            Each archived thread.
+
+        Raises:
+            ValueError: ``joined`` was set without ``private``.
+        """
+        if joined and not private:
+            raise ValueError("joined=True requires private=True")
+        http = self._require_http()
+
+        cursor: str | None = None
+        if before is not None:
+            if joined:
+                cursor = str(
+                    datetime_to_snowflake(before)
+                    if isinstance(before, datetime)
+                    else before.id
+                )
+            else:
+                moment = (
+                    before
+                    if isinstance(before, datetime)
+                    else snowflake_to_datetime(before.id)
+                )
+                cursor = moment.astimezone(timezone.utc).isoformat()
+
+        if joined:
+            endpoint = http.get_joined_private_archived_threads
+        elif private:
+            endpoint = http.get_private_archived_threads
+        else:
+            endpoint = http.get_public_archived_threads
+
+        while limit is None or limit > 0:
+            page = 100 if limit is None else max(2, min(100, limit))
+            data = await endpoint(self.id, before=cursor, limit=page)
+            threads = data.get("threads", [])
+            members = {
+                int(item["id"]): item
+                for item in data.get("members", [])
+                if item.get("id") is not None
+            }
+            for item in threads:
+                thread = self._bind_thread(item, http)
+                if thread.id in members:
+                    thread._me = self._own_thread_member(members[thread.id], thread.id)
+                yield thread
+                if limit is not None:
+                    limit -= 1
+                    if limit <= 0:
+                        return
+            if not data.get("has_more") or not threads:
+                return
+            last = threads[-1]
+            cursor = (
+                str(last["id"])
+                if joined
+                else (last.get("thread_metadata") or {}).get("archive_timestamp")
+            )
+            if cursor is None:
+                return
+
+    async def join(self) -> None:
+        """Join this thread.
+
+        Returns:
+            None.
+        """
+        await self._require_thread("be joined").join_thread(self.id)
+
+    async def leave(self) -> None:
+        """Leave this thread.
+
+        Returns:
+            None.
+        """
+        await self._require_thread("be left").leave_thread(self.id)
+
+    async def add_user(self, user: Any, /) -> None:
+        """Add a user to this thread.
+
+        Needs ``SEND_MESSAGES_IN_THREADS``; in a private thread that is not
+        invitable, you or the user must be a thread moderator.
+
+        Args:
+            user: The user, member or ID to add.
+
+        Returns:
+            None.
+        """
+        http = self._require_thread("have members added")
+        await http.add_thread_member(self.id, getattr(user, "id", user))
+
+    async def remove_user(self, user: Any, /) -> None:
+        """Remove a user from this thread.
+
+        Needs a thread moderator, or the owner of a private thread.
+
+        Args:
+            user: The user, member or ID to remove.
+
+        Returns:
+            None.
+        """
+        http = self._require_thread("have members removed")
+        await http.remove_thread_member(self.id, getattr(user, "id", user))
+
+    async def fetch_member(self, user_id: int, /) -> ThreadMember:
+        """Fetch one member of this thread; bots only.
+
+        Args:
+            user_id: The member's user ID.
+
+        Returns:
+            The thread membership.
+        """
+        http = self._require_thread("fetch members")
+        data = await http.get_thread_member(self.id, user_id)
+        return self._thread_member(data, self.id)
+
+    async def fetch_members(self) -> list[ThreadMember]:
+        """Fetch every member of this thread; bots only.
+
+        Returns:
+            The thread memberships in ascending user ID order.
+        """
+        http = self._require_thread("fetch members")
+        result: list[ThreadMember] = []
+        after: int | None = None
+        while True:
+            page = await http.get_thread_members(self.id, after=after, limit=100)
+            result.extend(self._thread_member(item, self.id) for item in page)
+            if len(page) < 100:
+                return result
+            after = result[-1].id
 
     async def connect(
         self,

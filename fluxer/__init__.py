@@ -3,7 +3,7 @@
 This module documents the existing implementation and its supported public surface.
 """
 
-__version__ = "0.5.0-alpha.5"
+__version__ = "0.5.0-alpha.6"
 __title__ = "fluxer.py"
 __author__ = "Emil"
 __license__ = "MIT"
@@ -12,7 +12,27 @@ __license__ = "MIT"
 from .client import Client
 from .ext.commands import Bot, when_mentioned_or, when_mentioned
 from .cog import Cog
-from .enums import ChannelType, GatewayCloseCode, GatewayOpcode, Intents, Permissions
+from .enums import (
+    ChannelType,
+    GatewayCloseCode,
+    GatewayOpcode,
+    Intents,
+    Permissions,
+    Status,
+)
+from .audit_logs import AuditLogEntry
+from .invite import Invite
+from .raw_models import (
+    RawBulkMessageDeleteEvent,
+    RawMemberRemoveEvent,
+    RawMessageDeleteEvent,
+    RawMessageUpdateEvent,
+    RawPresenceUpdateEvent,
+    RawThreadDeleteEvent,
+    RawThreadMembersUpdate,
+    RawThreadUpdateEvent,
+    RawTypingEvent,
+)
 from .asset import Asset
 from .file import File
 from .flags import AttachmentFlags, MessageFlags
@@ -61,6 +81,7 @@ from .errors import (
 from .models import (
     Channel,
     ChannelMention,
+    CustomStatus,
     Embed,
     EmbedAuthor,
     EmbedField,
@@ -76,8 +97,13 @@ from .models import (
     MessageSnapshot,
     DeletedReferencedMessage,
     PartialMessage,
+    RawReactionActionEvent,
+    RawReactionClearEmojiEvent,
+    RawReactionClearEvent,
     Reaction,
     Role,
+    ThreadMember,
+    ThreadMetadata,
     User,
     UserProfile,
     VoiceState,
@@ -123,6 +149,7 @@ __all__ = [
     "GatewayOpcode",
     "Intents",
     "Permissions",
+    "Status",
     "AttachmentFlags",
     "MessageFlags",
     "PermissionOverwriteType",
@@ -144,9 +171,11 @@ __all__ = [
     "RateLimited",
     "Unauthorized",
     # Models
+    "AuditLogEntry",
     "Channel",
     "ChannelPermissionOverwrite",
     "ChannelMention",
+    "CustomStatus",
     "Embed",
     "EmbedAuthor",
     "EmbedField",
@@ -157,6 +186,7 @@ __all__ = [
     "Emoji",
     "Guild",
     "GuildMember",
+    "Invite",
     "Message",
     "MessageReference",
     "MessageSnapshot",
@@ -164,11 +194,25 @@ __all__ = [
     "PartialMessage",
     "PermissionOverwrite",
     "PermissionOverwritePayload",
+    "RawBulkMessageDeleteEvent",
+    "RawMemberRemoveEvent",
+    "RawMessageDeleteEvent",
+    "RawMessageUpdateEvent",
+    "RawPresenceUpdateEvent",
+    "RawReactionActionEvent",
+    "RawReactionClearEmojiEvent",
+    "RawReactionClearEvent",
+    "RawThreadDeleteEvent",
+    "RawThreadMembersUpdate",
+    "RawThreadUpdateEvent",
+    "RawTypingEvent",
     "Reaction",
     "Role",
     "SearchIndexing",
     "SearchResponse",
     "SearchResult",
+    "ThreadMember",
+    "ThreadMetadata",
     "User",
     "UserProfile",
     "VoiceState",

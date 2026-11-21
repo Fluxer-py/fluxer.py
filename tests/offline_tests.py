@@ -1686,7 +1686,7 @@ async def test_client_cache_dispatch() -> None:
     await client._dispatch("MESSAGE_DELETE", {"id": "500", "channel_id": "10"})
 
     assert ("message", 500) in seen
-    assert ("edit", "new", None) in seen
+    assert ("edit", "old", "new") in seen
     assert ("raw_reaction", 500) in seen
     assert ("fluxer", "SAVED_MESSAGE_CREATE") in seen
     assert ("delete", 500) in seen

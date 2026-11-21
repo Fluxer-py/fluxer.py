@@ -19,9 +19,13 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ..file import File
     from ..http import HTTPClient
+    from ..raw_models import RawPresenceUpdateEvent
     from .channel import Channel
     from .message import Message
 
+from ..activity import CustomActivity
+from ..enums import Status
+from .presence import CustomStatus
 from .user import User
 
 
@@ -64,6 +68,11 @@ class GuildMember:
         guild_avatar_url: URL for the member's guild-specific avatar, if set.
         guild_banner: The member's guild-specific banner, if set.
         guild_banner_url: URL for the member's guild-specific banner, if set.
+        status: Published presence status, ``Status.offline`` until a presence arrives.
+        raw_status: Published presence status as the wire string.
+        custom_status: The member's custom status, or None.
+        activity: The custom status as a ``CustomActivity``, or None.
+        activities: The custom status as a one-item tuple, or an empty tuple.
     """
 
     # The underlying user
@@ -95,6 +104,12 @@ class GuildMember:
     guild_mention_flags: int | None = None
 
     _http: HTTPClient | None = field(default=None, repr=False)
+
+    # Presence, kept in private fields so member updates never reset it.
+    _status: str = field(default="offline", repr=False, compare=False)
+    _mobile: bool = field(default=False, repr=False, compare=False)
+    _afk: bool = field(default=False, repr=False, compare=False)
+    _custom_status: CustomStatus | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def from_data(
@@ -146,6 +161,83 @@ class GuildMember:
             The member's account ID.
         """
         return self.user.id
+
+    @property
+    def status(self) -> Status:
+        """The member's published presence status.
+
+        Returns:
+            The status; ``Status.offline`` until a presence has been received.
+        """
+        try:
+            return Status(self._status)
+        except ValueError:
+            return Status.offline
+
+    @property
+    def raw_status(self) -> str:
+        """The member's published presence status as the wire string.
+
+        Returns:
+            ``"online"``, ``"idle"``, ``"dnd"``, or ``"offline"``.
+        """
+        return self._status
+
+    @property
+    def custom_status(self) -> CustomStatus | None:
+        """The member's custom status.
+
+        Returns:
+            The custom status, or None when none is published.
+        """
+        return self._custom_status
+
+    @property
+    def activities(self) -> tuple[CustomActivity, ...]:
+        """The member's activities.
+
+        Fluxer publishes custom statuses only, so this holds at most one
+        ``CustomActivity`` named after the custom status text.
+
+        Returns:
+            A tuple with the custom status, or an empty tuple.
+        """
+        custom = self._custom_status
+        if custom is None or (custom.text is None and custom.emoji_name is None):
+            return ()
+        return (CustomActivity(name=custom.text, type=4),)
+
+    @property
+    def activity(self) -> CustomActivity | None:
+        """The member's primary activity, which on Fluxer is its custom status.
+
+        Returns:
+            The custom status as a ``CustomActivity``, or None.
+        """
+        activities = self.activities
+        return activities[0] if activities else None
+
+    def is_on_mobile(self) -> bool:
+        """Return whether the member's online status comes from a mobile session.
+
+        Returns:
+            Fluxer's ``mobile`` presence flag.
+        """
+        return self._mobile
+
+    def is_afk(self) -> bool:
+        """Return whether every one of the member's sessions is away.
+
+        Returns:
+            Fluxer's ``afk`` presence flag.
+        """
+        return self._afk
+
+    def _presence_update(self, raw: RawPresenceUpdateEvent) -> None:
+        self._status = raw.raw_status
+        self._mobile = raw.mobile
+        self._afk = raw.afk
+        self._custom_status = raw.custom_status
 
     @property
     def display_name(self) -> str:

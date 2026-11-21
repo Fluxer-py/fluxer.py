@@ -183,9 +183,54 @@ class ChannelType(enum.IntEnum):
     GUILD_VOICE = 2
     GROUP_DM = 3
     GUILD_CATEGORY = 4
-    GUILD_ANNOUNCEMENT = 5  # Legacy compatibility value, unsupported by Fluxer.
+    GUILD_ANNOUNCEMENT = 5
+    ANNOUNCEMENT_THREAD = 10
+    PUBLIC_THREAD = 11
+    PRIVATE_THREAD = 12
+    GUILD_FORUM = 15
+    GUILD_MEDIA = 16
     GUILD_LINK = 998
     NOTES = 999
+
+
+THREAD_CHANNEL_TYPES = frozenset(
+    {
+        ChannelType.ANNOUNCEMENT_THREAD,
+        ChannelType.PUBLIC_THREAD,
+        ChannelType.PRIVATE_THREAD,
+    }
+)
+
+
+class Status(str, enum.Enum):
+    """Published presence status of a user, as carried by Presence Update.
+
+    A user who selected ``invisible`` is published as ``offline``, so
+    ``invisible`` is only ever seen on the current user's own settings.
+
+    Attributes:
+        online: The user is online.
+        idle: The user is idle.
+        dnd: The user selected Do Not Disturb.
+        do_not_disturb: Alias of ``dnd``.
+        invisible: The user selected invisible.
+        offline: The user is offline or invisible.
+    """
+
+    online = "online"
+    idle = "idle"
+    dnd = "dnd"
+    do_not_disturb = "dnd"
+    invisible = "invisible"
+    offline = "offline"
+
+    def __str__(self) -> str:
+        """Return the wire value, matching discord.py's ``str(status)``.
+
+        Returns:
+            The status string, such as ``"online"``.
+        """
+        return self.value
 
 
 # =============================================================================
@@ -238,6 +283,12 @@ class Permissions(enum.IntFlag):
     UPDATE_RTC_REGION = 1 << 53
     VIEW_CHANNEL_MEMBERS = 1 << 54
 
+    # -- Threads --
+    MANAGE_THREADS = 1 << 34
+    CREATE_PUBLIC_THREADS = 1 << 35
+    CREATE_PRIVATE_THREADS = 1 << 36
+    SEND_MESSAGES_IN_THREADS = 1 << 38
+
     # -- Voice --
     CONNECT = 1 << 20
     SPEAK = 1 << 21
@@ -255,4 +306,11 @@ class Permissions(enum.IntFlag):
     MANAGE_EXPRESSIONS = 1 << 30
 
 
-__all__ = ("GatewayOpcode", "Intents", "GatewayCloseCode", "ChannelType", "Permissions")
+__all__ = (
+    "GatewayOpcode",
+    "Intents",
+    "GatewayCloseCode",
+    "ChannelType",
+    "Permissions",
+    "Status",
+)

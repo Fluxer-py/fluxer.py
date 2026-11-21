@@ -13,6 +13,7 @@ VoiceChannel = Channel
 CategoryChannel = Channel
 DMChannel = Channel
 GroupChannel = Channel
+Thread = Channel
 
 
 def _channel_factory(channel_type: int) -> tuple[type[Channel], ChannelType | int]:
@@ -29,4 +30,5 @@ __all__ = (
     "CategoryChannel",
     "DMChannel",
     "GroupChannel",
+    "Thread",
 )

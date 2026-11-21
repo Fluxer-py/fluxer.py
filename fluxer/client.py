@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .voice import VoiceClient
 
 from .enums import Intents
+from ._logging import _LIBRARY_LOGGER, _logging_configured, setup_logging
 from ._types import UNSET, UnsetType
 from .errors import GatewayNotConnected
 from .fluxer_models import (
@@ -32,6 +33,7 @@ from .fluxer_models import (
 )
 from .gateway import Gateway
 from .http import HTTPClient
+from .mentions import AllowedMentions
 from .models import Channel, Guild, Message, User, UserProfile, VoiceState, Webhook
 from .models.member import GuildMember
 from .state import ConnectionState
@@ -69,6 +71,8 @@ class Client:
         max_messages: int = 1000,
         cache_members: bool = True,
         max_private_channels: int | None | UnsetType = UNSET,
+        enable_debug_events: bool = False,
+        allowed_mentions: AllowedMentions | None = None,
     ) -> None:
         """Initialize the client with the supplied configuration.
 
@@ -81,6 +85,10 @@ class Client:
             max_messages: Max messages used by this operation.
             cache_members: Whether guilds retain member objects.
             max_private_channels: Private-channel bound; defaults to 128 for bots and unlimited for user accounts. None disables the bound.
+            enable_debug_events: Whether to dispatch ``on_socket_raw_receive``,
+                ``on_socket_raw_send``, and ``on_socket_event_type``.
+            allowed_mentions: Mention policy applied to every message sent; a
+                per-message ``allowed_mentions`` is merged over it.
         """
         if intents is not None:
             warnings.warn(
@@ -115,6 +123,8 @@ class Client:
         ] = {}
         self._max_retries = max_retries
         self._retry_forever = retry_forever
+        self._enable_debug_events = enable_debug_events
+        self.allowed_mentions = allowed_mentions
 
     @property
     def _user(self) -> User | None:
@@ -132,6 +142,31 @@ class Client:
             The result of this operation.
         """
         return self._user
+
+    @property
+    def allowed_mentions(self) -> AllowedMentions | None:
+        """Mention policy applied to every message this client sends.
+
+        Returns:
+            The policy, or None when messages use Fluxer's defaults.
+        """
+        return self._state.allowed_mentions
+
+    @allowed_mentions.setter
+    def allowed_mentions(self, value: AllowedMentions | None) -> None:
+        """Set the mention policy applied to every message this client sends.
+
+        Args:
+            value: The policy, or None to use Fluxer's defaults.
+
+        Raises:
+            TypeError: If value is not an ``AllowedMentions`` or None.
+        """
+        if value is not None and not isinstance(value, AllowedMentions):
+            raise TypeError(
+                f"allowed_mentions must be AllowedMentions, not {type(value).__name__}"
+            )
+        self._state.allowed_mentions = value
 
     @property
     def latency(self) -> float:
@@ -300,16 +335,12 @@ class Client:
             async def on_message(message):
                 ...
 
-        Supported events (mapped from gateway dispatch names):
-            on_ready       -> READY
-            on_message      -> MESSAGE_CREATE
-            on_message_edit -> MESSAGE_UPDATE
-            on_message_delete -> MESSAGE_DELETE
-            on_guild_join   -> GUILD_CREATE
-            on_guild_remove -> GUILD_DELETE
-            on_member_join  -> GUILD_MEMBER_ADD
-            on_member_remove -> GUILD_MEMBER_REMOVE
-            ... and any other gateway event as on_{lowercase_name}
+        Events use discord.py's names and arguments wherever Fluxer has the
+        same concept, for example on_message(message),
+        on_message_edit(before, after), on_reaction_remove(reaction, user)
+        and on_member_join(member). Every gateway dispatch is also delivered
+        as on_<lowercase_name>_data(payload). The full list is in the
+        "Events" page of the documentation.
 
         Args:
             func: Callable registered or applied by this helper.
@@ -384,11 +415,16 @@ class Client:
     def dispatch(self, event_name: str, *args: Any, **kwargs: Any) -> None:
         """Schedule registered handlers for a manually dispatched event.
 
+        Pending ``wait_for`` calls for the event are resolved too.
+
         Args:
-            event_name: Registered handler name.
+            event_name: Registered handler name, such as ``on_command``.
             *args: Positional callback arguments.
             **kwargs: Keyword callback arguments.
         """
+        log.debug("Dispatching event %s", event_name)
+        if not kwargs:
+            self._dispatch_waiters(event_name, *args)
         for handler in tuple(self._event_handlers.get(event_name, ())):
             self.loop_create_task(
                 self._run_event_handler(event_name, handler, *args, **kwargs)
@@ -409,7 +445,34 @@ class Client:
         try:
             await handler(*args, **kwargs)
         except Exception:
-            log.exception("Error in event handler '%s'", event_name)
+            try:
+                await self.on_error(event_name, *args, **kwargs)
+            except Exception:
+                log.exception("Error in on_error while handling '%s'", event_name)
+
+    async def on_error(self, event_method: str, /, *args: Any, **kwargs: Any) -> None:
+        """Handle an exception raised by an event handler.
+
+        Called from inside the ``except`` block, so ``sys.exc_info()`` and
+        ``traceback.format_exc()`` describe the error. Handlers registered as
+        ``on_error`` (through ``@client.event`` or ``listen``) receive the event
+        name and the event's arguments; without any, the error is logged.
+        Override this method in a subclass to replace the default.
+
+        Args:
+            event_method: Name of the handler's event, such as ``on_message``.
+            *args: Positional arguments the failing handler received.
+            **kwargs: Keyword arguments the failing handler received.
+        """
+        handlers = tuple(self._event_handlers.get("on_error", ()))
+        if not handlers or event_method == "on_error":
+            log.exception("Error in event handler '%s'", event_method)
+            return
+        for handler in handlers:
+            try:
+                await handler(event_method, *args, **kwargs)
+            except Exception:
+                log.exception("Error in on_error handler for '%s'", event_method)
 
     # =========================================================================
     # Event dispatching
@@ -424,6 +487,7 @@ class Client:
         3. Fires matching user event handlers
         4. Fires ``on_<gateway_event_name>_data`` with the original payload
         """
+        log.debug("Dispatching gateway event %s", event_name)
         try:
             await self._dispatch_modeled(event_name, data)
         finally:
@@ -1198,6 +1262,7 @@ class Client:
         """
         self._closed = False
         self._ready.clear()
+        log.info("Logging in using static token")
 
         self._http = HTTPClient(
             token,
@@ -1216,6 +1281,8 @@ class Client:
             intents=self.intents,
             dispatch=self._dispatch,
             on_disconnect=self._state._interrupt,
+            notify=self.dispatch,
+            debug_events=self._enable_debug_events,
         )
 
         try:
@@ -1263,20 +1330,59 @@ class Client:
                 finally:
                     self._state.clear()
 
-    def run(self, token: str) -> None:
+    def run(
+        self,
+        token: str,
+        *,
+        log_handler: logging.Handler | None | UnsetType = UNSET,
+        log_formatter: logging.Formatter | UnsetType = UNSET,
+        log_level: int | str | UnsetType = UNSET,
+        root_logger: bool = False,
+        use_rich: bool | None = None,
+    ) -> None:
         """Blocking call that connects to Fluxer and runs the bot.
 
         This is the simplest way to start your bot:
             bot.run("your_token_here")
 
-        It creates an event loop, calls start(), and handles cleanup.
+        It sets up console logging, creates an event loop, calls start(), and
+        handles cleanup. Logging is set up as with ``fluxer.utils.setup_logging``
+        unless ``log_handler`` is None, or your code already configured logging
+        (for example with ``logging.basicConfig``) and passed no ``log_handler``.
 
         Args:
             token: Caller-supplied credential or webhook capability; keep this value secret.
+            log_handler: Handler for the library's logs, None to leave logging
+                alone, or omitted for the default console handler.
+            log_formatter: Formatter for that handler; defaults to a coloured one.
+            log_level: Level for the library's logs, such as ``logging.DEBUG`` or
+                ``"DEBUG"``. Defaults to INFO.
+            root_logger: Whether to configure the root logger too, so your own
+                loggers print through the same handler.
+            use_rich: True to require rich, False to never use it, None to use it
+                when installed and writing to a terminal.
 
         Returns:
             None.
         """
+        if log_handler is not None:
+            level = logging.INFO if isinstance(log_level, UnsetType) else log_level
+            if isinstance(log_handler, UnsetType) and _logging_configured():
+                if not isinstance(log_level, UnsetType):
+                    logging.getLogger(_LIBRARY_LOGGER).setLevel(
+                        level.upper() if isinstance(level, str) else level
+                    )
+                log.debug("Logging is already configured; skipping automatic setup")
+            else:
+                setup_logging(
+                    handler=None if isinstance(log_handler, UnsetType) else log_handler,
+                    formatter=None
+                    if isinstance(log_formatter, UnsetType)
+                    else log_formatter,
+                    level=level,
+                    root=root_logger,
+                    use_rich=use_rich,
+                )
 
         async def _runner() -> None:
             try:

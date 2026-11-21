@@ -14,18 +14,9 @@ import asyncio
 from fluxer.ext.commands import Context
 
 
-def get_log_level() -> int:
-    """Read the logging level from LOG_LEVEL.
-
-    Returns:
-        The configured level, falling back to INFO.
-    """
-    log_level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
-    return getattr(logging, log_level, logging.INFO)
-
-
-# Set up logging
-logging.basicConfig(level=get_log_level())
+# Set up coloured console logging (rich output when `fluxer.py[rich]` is installed).
+# bot.run() does this for you; this example calls bot.start() itself, so it sets it up here.
+fluxer.utils.setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
 bot = fluxer.Bot(command_prefix=os.getenv("PREFIX", "!"))

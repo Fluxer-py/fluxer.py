@@ -19,6 +19,9 @@ nav = [
   { "Your first bot" = "quick-start.md" },
   { "More info" = "readme.md" },
   { "Caching" = "caching.md" },
+  { "Events" = "events.md" },
+  { "Threads" = "threads.md" },
+  { "Logging" = "logging.md" },
 ]
 
 # extra_css = ["stylesheets/extra.css"]

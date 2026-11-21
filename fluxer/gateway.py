@@ -123,6 +123,8 @@ class Gateway:
         intents: Intents,
         dispatch: Callable[[str, Any], Coroutine[Any, Any, None]],
         on_disconnect: Callable[[], None] | None = None,
+        notify: Callable[..., None] | None = None,
+        debug_events: bool = False,
     ) -> None:
         """Initialize the gateway with the supplied configuration.
 
@@ -132,12 +134,16 @@ class Gateway:
             intents: Deprecated compatibility mask; Fluxer does not use intents to filter events.
             dispatch: Dispatch used by this operation.
             on_disconnect: Internal callback invalidating non-replayable cache requests.
+            notify: Schedules client events such as ``on_connect``; it must not block.
+            debug_events: Whether to report raw socket traffic through ``notify``.
         """
         self._http = http_client
         self._token = token
         self._intents = intents
         self._dispatch = dispatch
         self._on_disconnect = on_disconnect
+        self._notify = notify
+        self._debug_events = debug_events
 
         # Connection state
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -233,10 +239,16 @@ class Gateway:
         connect_url = self._resume_gateway_url or url
         if self._resume_gateway_url:
             connect_url = self._gateway_url(self._resume_gateway_url)
+        if self._disconnected_at is not None:
+            log.info(
+                "Reconnecting to gateway (resume=%s)", self._session_id is not None
+            )
 
         assert self._session is not None
         self._ws = await self._session.ws_connect(connect_url, max_msg_size=0)
         log.info("WebSocket connected")
+        if self._notify is not None:
+            self._notify("on_connect")
 
         try:
             await self._event_loop()
@@ -244,6 +256,8 @@ class Gateway:
             self._disconnected_at = asyncio.get_running_loop().time()
             if self._on_disconnect is not None:
                 self._on_disconnect()
+            if self._notify is not None:
+                self._notify("on_disconnect")
             if self._dispatch_task is not None:
                 self._dispatch_task.cancel()
                 await asyncio.gather(self._dispatch_task, return_exceptions=True)
@@ -262,12 +276,15 @@ class Gateway:
             raise GatewayNotConnected("WebSocket connection not established")
 
         async for msg in self._ws:
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                payload = GatewayPayload.from_json(msg.data)
-                await self._handle_payload_task(payload)
-
-            elif msg.type == aiohttp.WSMsgType.BINARY:
-                payload = GatewayPayload.from_json(msg.data.decode("utf-8"))
+            if msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                raw = (
+                    msg.data
+                    if msg.type == aiohttp.WSMsgType.TEXT
+                    else msg.data.decode("utf-8")
+                )
+                if self._debug_events and self._notify is not None:
+                    self._notify("on_socket_raw_receive", raw)
+                payload = GatewayPayload.from_json(raw)
                 await self._handle_payload_task(payload)
 
             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
@@ -314,6 +331,9 @@ class Gateway:
         match payload.op:
             case GatewayOpcode.HELLO:
                 self._heartbeat_interval = payload.d["heartbeat_interval"] / 1000.0
+                log.debug(
+                    "Received HELLO, heartbeat interval %.2fs", self._heartbeat_interval
+                )
                 await self._start_heartbeat()
 
                 if self._session_id:
@@ -337,6 +357,8 @@ class Gateway:
 
             case GatewayOpcode.DISPATCH:
                 event_name = payload.t or ""
+                if self._debug_events and self._notify is not None:
+                    self._notify("on_socket_event_type", event_name)
                 await self._handle_dispatch(event_name, payload.d)
                 if payload.s is not None:
                     self._sequence = payload.s
@@ -364,9 +386,9 @@ class Gateway:
                 self._session_id = data["session_id"]
                 self._resume_gateway_url = data.get("resume_gateway_url")
                 log.info(
-                    "READY: session=%s, user=%s",
-                    self._session_id,
+                    "Connected to gateway as %s (session ID: %s)",
                     data["user"].get("username", "?"),
+                    self._session_id,
                 )
 
             case "RESUMED":
@@ -426,6 +448,8 @@ class Gateway:
                 delay = max(waits)
                 if delay <= 0:
                     await self._ws.send_str(raw)
+                    if self._debug_events and self._notify is not None:
+                        self._notify("on_socket_raw_send", raw)
                     sent = asyncio.get_running_loop().time()
                     self._sent_at.append(sent)
                     if payload.op == GatewayOpcode.PRESENCE_UPDATE:
@@ -465,6 +489,7 @@ class Gateway:
     async def _send_heartbeat(self) -> None:
         """Send a heartbeat to keep the connection alive."""
         payload = GatewayPayload(op=GatewayOpcode.HEARTBEAT, d=self._sequence)
+        log.debug("Sending heartbeat (seq=%s)", self._sequence)
         await self._send(payload)
         self._last_heartbeat_sent = time.perf_counter()
 

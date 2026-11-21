@@ -20,6 +20,7 @@ from ...models import Message
 from .context import Context
 from .core import Command, GroupMixin, _maybe_await
 from .errors import (
+    CheckFailure,
     CommandError,
     CommandNotFound,
     ExtensionAlreadyLoaded,
@@ -30,6 +31,8 @@ from .errors import (
 )
 from .help import DefaultHelpCommand, HelpCommand
 from .view import StringView
+
+log = logging.getLogger(__name__)
 
 Prefix = (
     str
@@ -128,6 +131,8 @@ class Bot(GroupMixin, Client):
             retry_forever=retry_forever,
             max_messages=int(options.get("max_messages", 1000)),
             cache_members=bool(options.get("cache_members", True)),
+            enable_debug_events=bool(options.get("enable_debug_events", False)),
+            allowed_mentions=options.get("allowed_mentions"),
         )
         GroupMixin.__init__(self)
         self.command_prefix: Prefix = command_prefix
@@ -367,14 +372,28 @@ class Bot(GroupMixin, Client):
         """
         if ctx.command is None:
             if ctx.invoked_with:
-                await self.on_command_error(ctx, CommandNotFound(ctx.invoked_with))
+                await self._dispatch_command_error(
+                    ctx, CommandNotFound(ctx.invoked_with)
+                )
             return
+        self.dispatch("on_command", ctx)
         try:
             if not await self.can_run(ctx, call_once=True):
-                return
+                raise CheckFailure("The global check once functions failed.")
             await ctx.command.invoke(ctx)
         except CommandError as exc:
-            await self.on_command_error(ctx, exc)
+            if ctx.command is not None:
+                await ctx.command.dispatch_error(ctx, exc)
+            else:
+                await self._dispatch_command_error(ctx, exc)
+        else:
+            if not ctx.command_failed:
+                self.dispatch("on_command_completion", ctx)
+
+    async def _dispatch_command_error(self, ctx: Context, exc: CommandError) -> None:
+        ctx.command_failed = True
+        self.dispatch("on_command_error", ctx, exc)
+        await self.on_command_error(ctx, exc)
 
     async def process_commands(self, message: Message) -> None:
         """Resolve and invoke the command contained in a message.
@@ -391,16 +410,32 @@ class Bot(GroupMixin, Client):
         await self.invoke(ctx)
 
     async def on_command_error(self, context: Context, exception: Exception) -> None:
-        """On command error.
+        """Default handler for command errors, run after any local handlers.
+
+        It logs the error unless something else handles it: a listener
+        registered as ``on_command_error`` (``@bot.event``, ``bot.listen()`` or
+        ``Cog.listener()``), the command's ``@command.error`` handler, or the
+        cog's ``cog_command_error``. Listeners receive every error, including
+        ones a local handler already saw. Override this method in a subclass to
+        replace the default logging.
 
         Args:
             context: Command invocation context used for parsing and output.
-            exception: Exception used by this operation.
+            exception: The command error.
 
         Returns:
             None.
         """
-        logging.getLogger(__name__).exception(
+        if self._event_handlers.get("on_command_error"):
+            return
+        command = context.command
+        if command is not None and command.has_error_handler():
+            return
+        cog = context.cog
+        if cog is not None and getattr(cog, "has_error_handler", None):
+            if cog.has_error_handler():
+                return
+        log.exception(
             "Ignoring exception in command %s", context.command, exc_info=exception
         )
 
@@ -430,13 +465,16 @@ class Bot(GroupMixin, Client):
             raise ValueError(f"Cog {name!r} is already loaded")
         bound_commands: list[Command] = []
         pending = self.all_commands.copy()
+        settings = getattr(type(cog), "__cog_settings__", {})
         for command in cog.get_commands():
             bound = command.copy()
             bound.cog = cog
+            bound._apply_cog_settings(settings)
             for child in (
                 bound.walk_commands() if hasattr(bound, "walk_commands") else [bound]
             ):
                 child.cog = cog
+                child._apply_cog_settings(settings)
             self._check_command(bound, pending)
             bound_commands.append(bound)
             for invocation in (bound.name, *bound.aliases):

@@ -33,6 +33,8 @@ class Context:
         view: View used by this operation.
         args: Positional arguments retained by this object.
         kwargs: Keyword arguments retained by this object.
+        command_failed: Whether the invoked command raised, including errors its own handler caught.
+        cog: The cog of the invoked command, or None.
         valid: Return whether a command was resolved for this context.
         guild: Return the guild cached for this invocation.
         channel: Return the channel cached for this invocation.
@@ -59,6 +61,16 @@ class Context:
         self.view: StringView | None = attrs.get("view")
         self.args: list[Any] = []
         self.kwargs: dict[str, Any] = {}
+        self.command_failed: bool = False
+
+    @property
+    def cog(self) -> Any | None:
+        """The cog of the invoked command.
+
+        Returns:
+            The cog, or None when there is no command or it has no cog.
+        """
+        return getattr(self.command, "cog", None)
 
     @property
     def valid(self) -> bool:

@@ -18,6 +18,7 @@ from .converter import _Greedy, run_converter
 from .cooldowns import BucketType, CooldownMapping, MaxConcurrency
 from .errors import (
     CheckFailure,
+    CommandError,
     CommandInvokeError,
     CommandNotFound,
     CommandOnCooldown,
@@ -52,7 +53,9 @@ class Command:
         checks: Alternative conditions evaluated by the check decorator.
         cog: Cog containing related commands and listeners.
         parent: Owning group for this command.
-        error_handler: Error handler used by this operation.
+        error_handler: The local error handler registered with ``error()``, or None.
+        on_error: The local error handler; present only once one is registered,
+            so ``hasattr(command, "on_error")`` works as in discord.py.
         before_invoke_hook: Before invoke hook used by this operation.
         after_invoke_hook: After invoke hook used by this operation.
         qualified_name: Return the name including the owning command groups.
@@ -69,6 +72,8 @@ class Command:
     description: str
     enabled: bool
     hidden: bool
+    # Set by error(); deliberately unassigned so hasattr() reports registration.
+    on_error: Callable[..., Awaitable[Any]]
 
     def __init__(self, func: Callable[..., Awaitable[Any]], **attrs: Any) -> None:
         """Initialize the command with the supplied configuration.
@@ -80,6 +85,8 @@ class Command:
         if not inspect.iscoroutinefunction(func):
             raise TypeError("Commands must be coroutine functions")
         self.callback: Callable[..., Awaitable[Any]] = func
+        # Keyword arguments given explicitly, which cog command_attrs never override.
+        self._original_kwargs: dict[str, Any] = dict(attrs)
         self.name = attrs.get("name") or func.__name__
         self.aliases = list(attrs.get("aliases", ()))
         self.help = attrs.get("help") or inspect.getdoc(func) or ""
@@ -96,9 +103,42 @@ class Command:
         )
         self.cog: Any = None
         self.parent: Group | None = None
-        self.error_handler: Callable[..., Awaitable[Any]] | None = None
         self.before_invoke_hook: Callable[..., Awaitable[Any]] | None = None
         self.after_invoke_hook: Callable[..., Awaitable[Any]] | None = None
+
+    @property
+    def error_handler(self) -> Callable[..., Awaitable[Any]] | None:
+        """The local error handler registered with ``error()``.
+
+        Returns:
+            The handler, or None when the command has none.
+        """
+        return getattr(self, "on_error", None)
+
+    @error_handler.setter
+    def error_handler(self, handler: Callable[..., Awaitable[Any]] | None) -> None:
+        """Replace or remove the local error handler.
+
+        Args:
+            handler: The new handler, or None to remove it.
+        """
+        if handler is not None:
+            self.on_error = handler
+        elif "on_error" in self.__dict__:
+            del self.on_error
+
+    def _apply_cog_settings(self, settings: dict[str, Any]) -> None:
+        """Apply a cog's ``command_attrs`` where this command set nothing itself."""
+        for key, value in settings.items():
+            if key not in self._original_kwargs and hasattr(self, key):
+                setattr(self, key, value)
+
+    def _copy_handlers(self, copied: Command) -> None:
+        copied._original_kwargs = dict(self._original_kwargs)
+        if self.has_error_handler():
+            copied.on_error = self.on_error
+        copied.before_invoke_hook = self.before_invoke_hook
+        copied.after_invoke_hook = self.after_invoke_hook
 
     @property
     def qualified_name(self) -> str:
@@ -179,6 +219,7 @@ class Command:
         copied._max_concurrency = (
             self._max_concurrency.copy() if self._max_concurrency else None
         )
+        self._copy_handlers(copied)
         return copied
 
     def add_check(self, func: Check) -> None:
@@ -207,18 +248,61 @@ class Command:
             pass
 
     def error(
-        self, coro: Callable[..., Awaitable[Any]]
+        self, coro: Callable[..., Awaitable[Any]], /
     ) -> Callable[..., Awaitable[Any]]:
-        """Error.
+        """Register a coroutine as this command's local error handler.
+
+        The handler receives ``(ctx, error)``, or ``(self, ctx, error)`` when the
+        command belongs to a cog. It runs first, then the cog's
+        ``cog_command_error``, and finally the bot's ``on_command_error`` as the
+        catch-all, as in discord.py.
 
         Args:
-            coro: Coroutine function invoked by the task or command wrapper.
+            coro: The coroutine function to register.
 
         Returns:
-            The configured decorator or callback wrapper.
+            The coroutine, unchanged, so the decorator can be stacked.
+
+        Raises:
+            TypeError: If ``coro`` is not a coroutine function.
         """
-        self.error_handler = coro
+        if not inspect.iscoroutinefunction(coro):
+            raise TypeError("The error handler must be a coroutine.")
+        self.on_error = coro
         return coro
+
+    def has_error_handler(self) -> bool:
+        """Return whether a local error handler is registered.
+
+        Returns:
+            Whether ``error()`` registered a handler for this command.
+        """
+        return hasattr(self, "on_error")
+
+    async def dispatch_error(self, ctx: Context, error: CommandError, /) -> None:
+        """Run this command's error handlers for a failed invocation.
+
+        Calls the local handler, then the cog's ``cog_command_error`` when the cog
+        overrides it, and always dispatches ``on_command_error`` last.
+
+        Args:
+            ctx: Invocation context of the failed command.
+            error: The command error.
+        """
+        ctx.command_failed = True
+        cog = self.cog
+        try:
+            handler = getattr(self, "on_error", None)
+            if handler is not None:
+                if cog is not None and not inspect.ismethod(handler):
+                    await handler(cog, ctx, error)
+                else:
+                    await handler(ctx, error)
+            if cog is not None and getattr(cog, "has_error_handler", None):
+                if cog.has_error_handler():
+                    await cog.cog_command_error(ctx, error)
+        finally:
+            await ctx.bot._dispatch_command_error(ctx, error)
 
     def before_invoke(
         self, coro: Callable[..., Awaitable[Any]]
@@ -257,6 +341,10 @@ class Command:
         Returns:
             Whether the documented condition holds for the current state.
         """
+        if not await ctx.bot.can_run(ctx):
+            raise CheckFailure(
+                f"The global check functions for command {self.qualified_name} failed."
+            )
         for predicate in self.checks:
             if not await _maybe_await(predicate(ctx)):
                 raise CheckFailure("A command check failed")
@@ -376,22 +464,12 @@ class Command:
             if ctx.bot._after_invoke:
                 await ctx.bot._after_invoke(ctx)
             return result
+        except CommandError:
+            ctx.command_failed = True
+            raise
         except Exception as exc:
-            if self.error_handler:
-                return await self.error_handler(ctx, exc)
-            raise (
-                CommandInvokeError(exc)
-                if not isinstance(
-                    exc,
-                    (
-                        DisabledCommand,
-                        CheckFailure,
-                        CommandOnCooldown,
-                        MissingRequiredArgument,
-                    ),
-                )
-                else exc
-            )
+            ctx.command_failed = True
+            raise CommandInvokeError(exc) from exc
         finally:
             if acquired and self._max_concurrency:
                 await self._max_concurrency.release(ctx.message)
@@ -626,7 +704,9 @@ class Group(GroupMixin, Command):
         checks: Alternative conditions evaluated by the check decorator.
         cog: Cog containing related commands and listeners.
         parent: Owning group for this command.
-        error_handler: Error handler used by this operation.
+        error_handler: The local error handler registered with ``error()``, or None.
+        on_error: The local error handler; present only once one is registered,
+            so ``hasattr(command, "on_error")`` works as in discord.py.
         before_invoke_hook: Before invoke hook used by this operation.
         after_invoke_hook: After invoke hook used by this operation.
         qualified_name: Return the name including the owning command groups.
@@ -672,6 +752,7 @@ class Group(GroupMixin, Command):
         copied._max_concurrency = (
             self._max_concurrency.copy() if self._max_concurrency else None
         )
+        self._copy_handlers(copied)
         for command in self.commands:
             copied.add_command(command.copy())
         return copied

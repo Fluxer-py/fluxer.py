@@ -16,4 +16,6 @@ bot = MyBot(command_prefix=os.getenv("PREFIX", "!"))
 if __name__ == "__main__":
     # For security reasons, you SHOULDN'T just write your token here directly, but you can (and for example purposes we will just do that).
     # !! Consider using environment variables. !!
-    bot.run("token")
+    # bot.run() sets up coloured console logging (rich output when `fluxer.py[rich]` is installed).
+    # root_logger=True makes your own loggers, like the ones in the cogs, print through it too.
+    bot.run("token", log_level=os.getenv("LOG_LEVEL", "INFO"), root_logger=True)

@@ -220,6 +220,7 @@ class AuditLogEntry:
         reason: Audit-log reason forwarded when the underlying operation supports it.
         options: Action-specific details, when the action records any.
         changes: Properties the action changed.
+        guild_id: The guild the entry belongs to, set on Guild Audit Log Entry Create.
         raw_data: Original payload retained for privacy-controlled, variant-specific, or unmodeled fields; excluded from repr.
     """
 
@@ -231,6 +232,7 @@ class AuditLogEntry:
     options: AuditLogOptions | None = None
     changes: list[AuditLogChange] = field(default_factory=list)
     raw_data: dict[str, Any] = field(default_factory=dict, repr=False)
+    guild_id: int | None = None
 
     @classmethod
     def from_data(cls, data: dict[str, Any]) -> "AuditLogEntry":
@@ -259,6 +261,7 @@ class AuditLogEntry:
                 AuditLogChange.from_data(item) for item in data.get("changes", [])
             ],
             raw_data=data,
+            guild_id=int(data["guild_id"]) if data.get("guild_id") else None,
         )
 
 

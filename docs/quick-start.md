@@ -57,6 +57,32 @@ Pass `help_command=None` when constructing the bot to disable built-in help,
 or provide a `commands.HelpCommand` instance to replace it. A command prefix
 is required when constructing `fluxer.Bot`.
 
+### Hidden commands
+
+Pass `hidden=True` to keep a command or group out of the help listings. It
+still runs normally, and `!help <name>` still shows its own page, as in
+discord.py:
+
+```py
+@bot.command(hidden=True)
+async def reload(ctx: commands.Context):
+    """Owner-only maintenance command."""
+```
+
+To hide every command of a cog, pass `command_attrs` in the class statement.
+A command that sets `hidden=False` itself stays visible:
+
+```py
+class Admin(commands.Cog, command_attrs=dict(hidden=True)):
+    @commands.command()
+    async def purge_cache(self, ctx: commands.Context):
+        ...
+```
+
+`commands.DefaultHelpCommand(show_hidden=True)` lists hidden commands too, and
+`commands.DefaultHelpCommand(command_attrs={"hidden": True})` hides the help
+command itself.
+
 ## Gateway data events
 
 Every Gateway dispatch also has an `on_<gateway_event_name>_data` listener. The

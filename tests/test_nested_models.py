@@ -1,6 +1,9 @@
 """Documented sub-objects parse into typed models instead of plain dicts."""
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+import pytest
 
 import fluxer
 from fluxer.audit_logs import AuditLog, AuditLogChange, AuditLogOptions
@@ -69,6 +72,31 @@ def test_builder_and_request_payload_are_unchanged() -> None:
     assert "provider" not in request and "children" not in request
     # Dicts given to the constructor are converted.
     assert isinstance(Embed(footer={"text": "x"}).footer, EmbedFooter)  # type: ignore[arg-type]
+
+
+def test_embed_timestamp_accepts_datetime_and_iso_strings() -> None:
+    aware = datetime(2026, 1, 1, 12, 30, tzinfo=timezone(timedelta(hours=2)))
+    embed = Embed(title="t", timestamp=aware)
+    assert embed.timestamp == aware
+    # Serialised as UTC ISO8601 for the API.
+    assert embed.to_dict()["timestamp"] == "2026-01-01T10:30:00+00:00"
+
+    # Received payloads use the Z suffix, which Python 3.10 cannot parse directly.
+    received = Embed.from_dict({"timestamp": "2026-08-31T09:14:02.000Z"})
+    assert received.timestamp == datetime(2026, 8, 31, 9, 14, 2, tzinfo=timezone.utc)
+    embed.timestamp = "2026-01-01T00:00:00+00:00"  # type: ignore[assignment]
+    assert embed.timestamp == datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    # Naive datetimes follow the local timezone, like format_dt.
+    naive = datetime(2026, 1, 1, 8, 0)
+    embed.timestamp = naive
+    assert embed.timestamp is not None and embed.timestamp.tzinfo is not None
+    assert embed.timestamp == naive.astimezone()
+
+    embed.timestamp = None
+    assert "timestamp" not in embed.to_dict()
+    with pytest.raises(TypeError):
+        embed.timestamp = 1700000000  # type: ignore[assignment]
 
 
 def test_message_embeds_call_and_channel_mentions() -> None:

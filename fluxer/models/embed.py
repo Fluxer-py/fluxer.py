@@ -6,6 +6,7 @@ This module documents the existing implementation and its supported public surfa
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 _T = TypeVar("_T")
@@ -264,6 +265,36 @@ class EmbedMedia:
 _PARTS: dict[str, Any] = {}
 
 
+def _parse_timestamp(value: Any) -> datetime | None:
+    """Normalise an embed timestamp to an aware datetime.
+
+    Args:
+        value: None, an aware or naive datetime, or an ISO8601 string such as
+            the ``2026-08-31T09:14:02.000Z`` form Fluxer returns.
+
+    Returns:
+        An aware datetime, or None. Naive datetimes follow the local
+        timezone, matching ``fluxer.utils.format_dt``.
+
+    Raises:
+        TypeError: If value is neither a datetime nor a string.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    else:
+        raise TypeError(
+            "Embed.timestamp expects a datetime or an ISO8601 string, "
+            f"not {type(value).__name__}"
+        )
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed
+
+
 def _part(cls: Any, value: Any) -> Any:
     if value is None:
         return cls()
@@ -280,6 +311,10 @@ class Embed:
         embed.set_footer(text="Footer text")
         await channel.send(embed=embed)
 
+    ``timestamp`` is a datetime: ``Embed(timestamp=fluxer.utils.utcnow())`` or
+    ``embed.timestamp = datetime.now(timezone.utc)`` both work, and a received
+    embed's ISO8601 string is parsed into a datetime for you.
+
     Nested parts are typed objects (``embed.author.name``, ``embed.fields[0].value``).
     A part the embed does not have is an empty, falsy object
     whose attributes are None, so ``embed.footer.text`` is None instead of
@@ -291,7 +326,9 @@ class Embed:
         description: Embed description.
         url: Embed destination URL.
         color: Embed colour.
-        timestamp: Embed timestamp.
+        timestamp: Embed timestamp as an aware datetime. Assign a datetime or an
+            ISO8601 string and it is normalised; naive datetimes are taken as
+            local time. It is sent to Fluxer as a UTC ISO8601 string.
         footer: Embed footer.
         image: Main image.
         thumbnail: Thumbnail image.
@@ -312,7 +349,7 @@ class Embed:
     description: str | None = None
     url: str | None = None
     color: int | None = None
-    timestamp: str | None = None
+    timestamp: datetime | None = None
     footer: EmbedFooter = field(default_factory=EmbedFooter)
     image: EmbedMedia = field(default_factory=EmbedMedia)
     thumbnail: EmbedMedia = field(default_factory=EmbedMedia)
@@ -339,6 +376,8 @@ class Embed:
         part = _PARTS.get(name)
         if part is not None:
             value = _part(part, value)
+        elif name == "timestamp":
+            value = _parse_timestamp(value)
         elif name == "fields":
             value = [_part(EmbedField, item) for item in value or []]
         elif name == "children" and value is not None:
@@ -419,10 +458,12 @@ class Embed:
             The serialized representation with supported fields preserved.
         """
         d: dict[str, Any] = {}
-        for key in ("title", "description", "url", "color", "timestamp"):
+        for key in ("title", "description", "url", "color"):
             value = getattr(self, key)
             if value is not None:
                 d[key] = value
+        if self.timestamp is not None:
+            d["timestamp"] = self.timestamp.astimezone(timezone.utc).isoformat()
         for key in ("footer", "image", "thumbnail", "author"):
             value = getattr(self, key)
             if value:

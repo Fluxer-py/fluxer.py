@@ -16,6 +16,7 @@ from .attachment import Attachment
 from .embed import Embed
 from .member import GuildMember
 from .reaction import PartialEmoji, Reaction
+from .thread import ThreadArchiveDuration
 from .user import User
 
 from copy import deepcopy
@@ -30,6 +31,7 @@ from ..utils import snowflake_to_datetime
 if TYPE_CHECKING:
     from ..state import ConnectionState
     from ..file import File
+    from ..mentions import AllowedMentions
     from ..http import HTTPClient
     from .channel import Channel
     from .guild import Guild
@@ -302,6 +304,52 @@ class MessageSnapshot:
         )
 
 
+def _bind_thread(
+    data: dict[str, Any], http: HTTPClient | None, guild: Guild | None
+) -> Channel:
+    # Circular import: channel.py imports this module for Message.
+    from .channel import Channel  # noqa: PLC0415
+
+    thread = _snapshot(Channel.from_data, data, http)
+    if guild is not None:
+        thread._guild = guild
+        if thread.guild_id is None:
+            thread.guild_id = guild.id
+    return thread
+
+
+async def _start_thread(
+    http: HTTPClient | None,
+    channel_id: int,
+    message_id: int,
+    guild: Guild | None,
+    *,
+    name: str,
+    auto_archive_duration: int | UnsetType,
+    slowmode_delay: int | None,
+    reason: str | None,
+) -> Channel:
+    if http is None:
+        raise RuntimeError("Message is not bound to an HTTP client")
+    data = await http.start_thread_with_message(
+        channel_id,
+        message_id,
+        name=name,
+        auto_archive_duration=auto_archive_duration,
+        rate_limit_per_user=UNSET if slowmode_delay is None else slowmode_delay,
+        reason=reason,
+    )
+    return _bind_thread(data, http, guild)
+
+
+async def _fetch_thread(
+    http: HTTPClient | None, message_id: int, guild: Guild | None
+) -> Channel:
+    if http is None:
+        raise RuntimeError("Message is not bound to an HTTP client")
+    return _bind_thread(await http.get_channel(message_id), http, guild)
+
+
 @dataclass(slots=True)
 class PartialMessage:
     """Lightweight handle for a Fluxer message.
@@ -310,6 +358,7 @@ class PartialMessage:
         channel_id: Channel identity retained from the payload or operation context.
         id: Identity of the object used by this operation.
         jump_url: Build the message link using the client's discovered webapp service.
+        thread: The cached thread started from this message.
     """
 
     channel_id: int
@@ -413,6 +462,54 @@ class PartialMessage:
         else:
             await self._http.acknowledge_message(self.channel_id, self.id)
 
+    @property
+    def thread(self) -> Channel | None:
+        """The cached thread started from this message.
+
+        Returns:
+            The thread, or None when there is none or it is not cached.
+        """
+        return self._guild.get_thread(self.id) if self._guild is not None else None
+
+    async def create_thread(
+        self,
+        *,
+        name: str,
+        auto_archive_duration: ThreadArchiveDuration | UnsetType = UNSET,
+        slowmode_delay: int | None = None,
+        reason: str | None = None,
+    ) -> Channel:
+        """Start a public thread from this message.
+
+        Args:
+            name: Thread name, 1 to 100 characters.
+            auto_archive_duration: Minutes of inactivity before archiving; Fluxer
+                defaults to 4320.
+            slowmode_delay: Slowmode in seconds; defaults to the channel's.
+            reason: Audit log reason.
+
+        Returns:
+            The created thread, whose ID is this message's ID.
+        """
+        return await _start_thread(
+            self._http,
+            self.channel_id,
+            self.id,
+            self._guild,
+            name=name,
+            auto_archive_duration=auto_archive_duration,
+            slowmode_delay=slowmode_delay,
+            reason=reason,
+        )
+
+    async def fetch_thread(self) -> Channel:
+        """Fetch the thread started from this message.
+
+        Returns:
+            The thread.
+        """
+        return await _fetch_thread(self._http, self.id, self._guild)
+
 
 @dataclass(slots=True)
 class Message:
@@ -457,6 +554,7 @@ class Message:
         guild: The guild this message was sent in (if cached).
         guild_id: Shortcut for the cached guild ID.
         jump_url: Build the message link using the client's discovered webapp service.
+        thread: The thread started from this message, from the cache or the payload.
     """
 
     id: int
@@ -497,6 +595,8 @@ class Message:
     _channel: Channel | None = field(default=None, repr=False)
     _guild: Guild | None = field(default=None, repr=False)
     _member_from_cache: bool = field(default=False, repr=False, compare=False)
+    _thread_data: dict[str, Any] | None = field(default=None, repr=False, compare=False)
+    _thread: Channel | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         """Normalize flags and bind the initial resolved message."""
@@ -587,6 +687,9 @@ class Message:
             channel_type=data.get("channel_type"),
             nicks={int(k): v for k, v in (data.get("nicks") or {}).items()},
             mention_here=data.get("mention_here", False),
+            _thread_data=data["thread"]
+            if isinstance(data.get("thread"), dict)
+            else None,
             _http=http,
             _state=getattr(http, "_state", None),
             referenced_message=(
@@ -712,6 +815,69 @@ class Message:
             self._http, "webapp", f"channels/{guild_id}/{self.channel_id}/{self.id}"
         )
 
+    @property
+    def thread(self) -> Channel | None:
+        """The thread started from this message.
+
+        Prefers the live cached thread, then the ``thread`` object Fluxer sends
+        with the message.
+
+        Returns:
+            The thread, or None when the message has none or it is unknown.
+        """
+        guild = self.guild
+        cached = guild.get_thread(self.id) if guild is not None else None
+        if cached is not None:
+            return cached
+        if self._thread is None and self._thread_data is not None:
+            self._thread = _bind_thread(self._thread_data, self._http, guild)
+        return self._thread
+
+    async def create_thread(
+        self,
+        *,
+        name: str,
+        auto_archive_duration: ThreadArchiveDuration | UnsetType = UNSET,
+        slowmode_delay: int | None = None,
+        reason: str | None = None,
+    ) -> Channel:
+        """Start a public thread from this message.
+
+        Args:
+            name: Thread name, 1 to 100 characters.
+            auto_archive_duration: Minutes of inactivity before archiving; Fluxer
+                defaults to 4320.
+            slowmode_delay: Slowmode in seconds; defaults to the channel's.
+            reason: Audit log reason.
+
+        Returns:
+            The created thread, whose ID is this message's ID.
+
+        Raises:
+            ValueError: The message is known to be outside a guild.
+        """
+        channel = self.channel
+        if self.guild_id is None and (channel is None or channel.guild_id is None):
+            raise ValueError("Threads can only be started from guild messages")
+        return await _start_thread(
+            self._http,
+            self.channel_id,
+            self.id,
+            self.guild,
+            name=name,
+            auto_archive_duration=auto_archive_duration,
+            slowmode_delay=slowmode_delay,
+            reason=reason,
+        )
+
+    async def fetch_thread(self) -> Channel:
+        """Fetch the thread started from this message.
+
+        Returns:
+            The thread.
+        """
+        return await _fetch_thread(self._http, self.id, self.guild)
+
     async def send(
         self,
         content: str | None = None,
@@ -720,6 +886,8 @@ class Message:
         embeds: list[Any] | None = None,
         file: File | None = None,
         files: list[File] | None = None,
+        allowed_mentions: AllowedMentions | None = None,
+        mention_author: bool | None = None,
         **kwargs: Any,
     ) -> Message:
         """Send a message to the same channel (without replying).
@@ -730,6 +898,10 @@ class Message:
             embeds: Multiple embeds to include.
             file: A single File object to attach.
             files: Multiple File objects to attach.
+            allowed_mentions: Mention policy merged over the client's
+                ``allowed_mentions``.
+            mention_author: Whether a reply notifies the replied-to author;
+                overrides ``replied_user``.
             **kwargs: Additional arguments to pass to send_message
 
         Returns:
@@ -739,7 +911,13 @@ class Message:
             raise RuntimeError("Message is not bound to an HTTP client")
 
         # Auto-convert single embed to embeds list
-        combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
+        combined_kwargs = {
+            "embed": embed,
+            "embeds": embeds,
+            "allowed_mentions": allowed_mentions,
+            "mention_author": mention_author,
+            **kwargs,
+        }
         combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format
@@ -768,6 +946,8 @@ class Message:
         embeds: list[Any] | None = None,
         file: File | None = None,
         files: list[File] | None = None,
+        allowed_mentions: AllowedMentions | None = None,
+        mention_author: bool | None = None,
         **kwargs: Any,
     ) -> Message:
         """Reply to this message with a message reference.
@@ -778,6 +958,10 @@ class Message:
             embeds: Multiple embeds to include.
             file: A single File object to attach.
             files: Multiple File objects to attach.
+            allowed_mentions: Mention policy merged over the client's
+                ``allowed_mentions``.
+            mention_author: Whether a reply notifies the replied-to author;
+                overrides ``replied_user``.
             **kwargs: Additional arguments to pass to send_message
 
         Returns:
@@ -787,7 +971,13 @@ class Message:
             raise RuntimeError("Message is not bound to an HTTP client")
 
         # Auto-convert single embed to embeds list
-        combined_kwargs = {"embed": embed, "embeds": embeds, **kwargs}
+        combined_kwargs = {
+            "embed": embed,
+            "embeds": embeds,
+            "allowed_mentions": allowed_mentions,
+            "mention_author": mention_author,
+            **kwargs,
+        }
         combined_kwargs = process_embed_args(combined_kwargs)
 
         # Handle file/files parameter - convert File objects to dict format

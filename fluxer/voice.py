@@ -302,8 +302,8 @@ class VoiceClient:
                     result = after(error)
                     if asyncio.iscoroutine(result):
                         await result
-                except Exception as e:
-                    log.exception(f"exception in audio callback: {e}")
+                except Exception:
+                    log.exception("Exception in audio 'after' callback")
 
     async def _run_ffmpeg_loop(self, source: FFmpegPCMAudio) -> None:
         if self._room is None:

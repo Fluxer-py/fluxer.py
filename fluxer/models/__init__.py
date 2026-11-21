@@ -25,6 +25,7 @@ from .message import (
     MessageSnapshot,
     PartialMessage,
 )
+from .presence import CustomStatus
 from .profile import GuildMemberProfile, MutualGuild, UserProfile
 from .reaction import (
     PartialEmoji,
@@ -34,6 +35,7 @@ from .reaction import (
     Reaction,
 )
 from .role import Role
+from .thread import ThreadMember, ThreadMetadata
 from .user import PendingBulkMessageDeletion, User
 from .voice import VoiceState
 from .webhook import Webhook, WebhookMessage
@@ -48,6 +50,7 @@ __all__ = [
     "EmbedMedia",
     "EmbedProvider",
     "ChannelMention",
+    "CustomStatus",
     "MessageCall",
     "GuildMemberProfile",
     "MutualGuild",
@@ -66,6 +69,8 @@ __all__ = [
     "RawReactionClearEvent",
     "RawReactionClearEmojiEvent",
     "Role",
+    "ThreadMember",
+    "ThreadMetadata",
     "UserProfile",
     "User",
     "VoiceState",

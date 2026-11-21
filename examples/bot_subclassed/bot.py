@@ -29,8 +29,7 @@ class MyBot(fluxer.Bot):
         """
         super().__init__(*args, **kwargs)
         # Since we are subclassing, we can define bot attributes here instead of having to pass them to the constructor, it's not the best idea to do it this way all the time but it's possible, and you can also modify these attributes at runtime if you want to
-        # Set up logging
-        logging.basicConfig(level=self.get_log_level())
+        # Logging is set up by bot.run() in main.py, see the log_level argument there.
 
         # Though it doesn't look nice, you can define commands and events in the constructor like this, but it's generally recommended to use cogs for better organization and separation of concerns, this is just an example to show that it's possible
         # We are working on a better way to implement these directly in the bot subclass, but for now this is how you would do it without cogs
@@ -76,12 +75,3 @@ class MyBot(fluxer.Bot):
         for filename in os.listdir("./cogs"):
             if filename.endswith(".py"):
                 await self.load_extension(f"cogs.{filename[:-3]}")
-
-    def get_log_level(self) -> int:
-        """Read the logging level from LOG_LEVEL.
-
-        Returns:
-            The configured level, falling back to INFO.
-        """
-        log_level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
-        return getattr(logging, log_level, logging.INFO)
